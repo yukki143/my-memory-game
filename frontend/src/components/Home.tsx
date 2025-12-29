@@ -1,5 +1,5 @@
 // frontend/src/components/Home.tsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 
 // 木のアイコン (SVG)
 const TreeIcon = ({ className }: { className: string }) => (
@@ -15,6 +15,36 @@ const CloudIcon = ({ className }: { className: string }) => (
     <path d="M17.5,19c-3.037,0-5.5-2.463-5.5-5.5c0-0.41,0.046-0.811,0.133-1.199C11.586,12.118,11.055,12,10.5,12 c-2.485,0-4.5,2.015-4.5,4.5s2.015,4.5,4.5,4.5h7c2.485,0,4.5-2.015,4.5-4.5S19.985,12,17.5,12c-0.23,0-0.453,0.038-0.668,0.103 C16.915,11.758,16.999,11.386,16.999,11c0-2.761-2.239-5-5-5c-2.31,0-4.256,1.571-4.839,3.699C6.883,9.227,6.452,9,6,9 c-3.314,0-6,2.686-6,6c0,3.314,2.686,6,6,6h11.5c3.037,0,5.5-2.463,5.5-5.5S20.537,19,17.5,19z" />
   </svg>
 );
+
+// --- 流れ星コンポーネント (ここが抜けていました！) ---
+const ShootingStars = () => {
+  const stars = useMemo(() => {
+    return Array.from({ length: 5 }).map((_, i) => ({
+      id: i,
+      top: Math.random() * 50 + '%',       // 上半分
+      left: Math.random() * 100 + '%',
+      delay: Math.random() * 5 + 's',
+      duration: 2 + Math.random() * 3 + 's'
+    }));
+  }, []);
+
+  return (
+    <>
+      {stars.map(s => (
+        <div 
+          key={s.id} 
+          className="shooting-star"
+          style={{ 
+            top: s.top, 
+            left: s.left, 
+            animationDelay: s.delay,
+            animationDuration: s.duration
+          }} 
+        />
+      ))}
+    </>
+  );
+};
 
 // --- 転がる積み木コンポーネント ---
 type KeyType = 'normal' | 'enter' | 'space' | 'wide';
@@ -70,6 +100,35 @@ type HomeProps = {
 
 function Home({ onGameStart }: HomeProps) {
   const [showModeSelect, setShowModeSelect] = useState(false);
+  // 夜モード管理
+  const [isNight, setIsNight] = useState(false);
+
+  // ★修正: 夜モードをCSSのアニメーション(60秒周期)に合わせてループさせる
+  useEffect(() => {
+    const runCycle = () => {
+      // 30秒後 (50%) に夜開始
+      const timerStart = setTimeout(() => setIsNight(true), 30000);
+      
+      // 60秒後 (100%) に夜終了
+      const timerEnd = setTimeout(() => setIsNight(false), 60000);
+      
+      return [timerStart, timerEnd];
+    };
+
+    // 初回の実行
+    let timers = runCycle();
+
+    // 以降、60秒ごとにループ実行
+    const interval = setInterval(() => {
+      timers = runCycle();
+    }, 60000);
+
+    // クリーンアップ（画面を閉じた時にタイマーを止める）
+    return () => {
+      clearInterval(interval);
+      timers.forEach(clearTimeout);
+    };
+  }, []);
 
   // ランダムな積み木生成
   const backgroundKeys = useMemo(() => {
@@ -105,12 +164,18 @@ function Home({ onGameStart }: HomeProps) {
 
   return (
     // theme-garden-bg に変更
-    <div className="min-h-screen theme-garden-bg text-[#5D4037] p-8 flex flex-col items-center justify-center relative overflow-hidden font-hakoniwa">
+    <div className="min-h-screen theme-garden-animate text-[#5D4037] p-8 flex flex-col items-center justify-center relative overflow-hidden font-hakoniwa">
       
       {/* --- 背景デコレーション --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         
+        {/* ★夜だけ流れ星を表示 */}
+        {isNight && <ShootingStars />}
+
         {/* 雲（白くてふわふわ） */}
+        <div className={`absolute top-10 left-0 animate-cloud-slow w-48 ${isNight ? 'opacity-10 text-white' : 'text-white/60'}`}>
+           <CloudIcon className="w-full h-full" />
+        </div>
         <div className="absolute top-10 left-0 text-white/60 animate-cloud-slow w-48"><CloudIcon className="w-full h-full" /></div>
         <div className="absolute top-32 left-1/3 text-white/40 animate-cloud-medium w-32"><CloudIcon className="w-full h-full" /></div>
         
@@ -137,8 +202,8 @@ function Home({ onGameStart }: HomeProps) {
             <h1 className="text-6xl md:text-8xl font-black text-green-500 mb-2 drop-shadow-md text-stroke-garden tracking-tight">
               BRAIN<br/>GARDEN
             </h1>
-            <p className="text-xl text-[#556b2f] font-bold tracking-widest mt-6 ivy-border-bottom">
-               知識を育てるタイピング箱庭ゲーム
+            <p className={`text-xl font-bold tracking-widest mt-6 ivy-border-bottom ${isNight ? 'text-black-500' : 'text-[#556b2f]'}`}>
+               知識を育てるメモリースポーツ × タイピングゲーム
             </p>
           </header>
 
@@ -177,7 +242,7 @@ function Home({ onGameStart }: HomeProps) {
             >
               <div className="w-full h-full p-4 flex justify-between items-center">
                 <div className="text-left">
-                  <div className="text-xl md:text-2xl font-black group-hover:text-white transition-colors">
+                  <div className="text-xl md:text-2xl font-black group-hover:text-white transition-colors duration-75">
                     1. フラッシュタイピング
                   </div>
                   <div className="text-sm opacity-80 font-bold pt-1">まずはここから育てよう！</div>
