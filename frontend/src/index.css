@@ -45,6 +45,74 @@
     linear-gradient(90deg, #e5e7eb 1px, transparent 1px);
   background-size: 40px 40px;
   background-position: center bottom;
+  transition: background-color 3s ease, color 3s ease;
+}
+
+.theme-garden-bg-night {
+  background-color: #1e1b4b; /* Indigo-950 (深い夜の色) */
+  /* 星空のようなグラデーション + 方眼紙線は薄く残す */
+  background-image: 
+    radial-gradient(circle at 50% 20%, #4c1d95 0%, #1e1b4b 60%), /* 紫の光 */
+    linear-gradient(#ffffff0d 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff0d 1px, transparent 1px);
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+  background-position: center top, center bottom, center bottom;
+  color: #e0e7ff; /* 文字色を薄い青白に */
+  transition: background-color 3s ease, color 3s ease;
+}
+
+/* --- 流れ星のアニメーション --- */
+@keyframes shooting {
+  0% {
+    transform: translateX(0) translateY(0) rotate(135deg) scale(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+    /* 進行方向: 左(-X) 下(+Y) */
+    transform: translateX(-20px) translateY(20px) rotate(135deg) scale(1);
+  }
+  100% {
+    /* 最終地点: 大きく左下へ移動 */
+    transform: translateX(-300px) translateY(300px) rotate(135deg) scale(0);
+    opacity: 0;
+  }
+}
+
+.shooting-star {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.1), 0 0 10px 2px white, 0 0 20px 5px #a855f7;
+  opacity: 0;
+  /* アニメーション適用 */
+  animation: shooting 4s ease-out infinite;
+  
+  /* アニメーション開始前から135度を維持するように設定 */
+  transform: rotate(135deg);
+  transform-origin: center center;
+}
+
+/* 流れ星の尾っぽ */
+.shooting-star::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  
+  /* 垂直位置の調整だけ残します */
+  transform: translateY(-50%); 
+  
+  width: 150px;
+  height: 2px;
+  
+  /* ★修正ポイント: グラデーションの向き */
+  /* to left (右から左へ) にすることで、星に近い右側を白く、遠い左側を透明にします */
+  background: linear-gradient(to left, rgba(255,255,255,1), transparent);
+  
+  /* 親要素の右端（星の頭）に合わせて配置 */
+  right: 0;
 }
 
 /* 地面: 芝生の断面 */
@@ -248,4 +316,66 @@
   display: inline-block;
   transform-style: preserve-3d;
   backface-visibility: visible;
+}
+
+/* --- 7. 時間経過アニメーション (朝 -> 夜 -> 朝 のループ) --- */
+@keyframes day-cycle {
+  /* --- 朝 (スタート) --- */
+  0% {
+    background-color: #F0FDF4; /* ミントグリーン */
+    color: #5D4037; /* 茶色の文字 */
+    --grid-color: rgba(0, 0, 0, 0.15); /* 線: 薄い黒 */
+  }
+
+  /* --- 夕方 --- */
+  45% {
+    background-color: #fbcfe8; /* ピンク */
+    color: #831843; /* ベリー色の文字 */
+    --grid-color: rgba(0, 0, 0, 0.15); /* 線: まだ薄い黒でOK */
+  }
+
+  /* --- 夜の始まり --- */
+  50% {
+    background-color: #fa9a59c9; /* オレンジ */
+    color: #4a044e; 
+    --grid-color: rgba(255, 255, 255, 0.15); /* 線: ここから薄い白に切り替え */
+  }
+
+  /* --- 深夜 (一番暗い) --- */
+  65% {
+    background-color: #7771d1; /* 濃紺 */
+    color: #e0e7ff; /* 白っぽい文字 */
+    --grid-color: rgba(255, 255, 255, 0.15); /* 線: はっきり見える薄い白 */
+  }
+
+  /* --- 夜明け前 --- */
+  95% {
+    background-color: #e76eb36e; /* ピンク */
+    color: #831843; /* ベリー色の文字 */
+    --grid-color: rgba(255, 255, 255, 0.15);
+  }
+
+  /* --- 翌朝 (0%に戻る) --- */
+  100% {
+    background-color: #f4f6f7; 
+    color: #5D4037;
+    --grid-color: rgba(0, 0, 0, 0.15); /* 線: 薄い黒に戻す */
+  }
+}
+
+.theme-garden-animate {
+  /* 変数の初期値をセット（念のため） */
+  --grid-color: rgba(0, 0, 0, 0.05);
+
+  /* 背景パターン: 色指定の部分を var(--grid-color) に置き換え */
+  background-image: 
+    linear-gradient(var(--grid-color) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+  
+  background-size: 40px 40px;
+  background-position: center bottom;
+  
+  /* ★修正: infinite にして無限ループさせる */
+  /* 名前を day-to-night から day-cycle に変更しました */
+  animation: day-cycle 60s linear infinite;
 }
