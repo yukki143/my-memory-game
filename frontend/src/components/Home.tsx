@@ -1,5 +1,6 @@
 // frontend/src/components/Home.tsx
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 // 木のアイコン (SVG)
 const TreeIcon = ({ className }: { className: string }) => (
@@ -45,6 +46,7 @@ const ShootingStars = () => {
     </>
   );
 };
+
 
 // --- 転がる積み木コンポーネント ---
 type KeyType = 'normal' | 'enter' | 'space' | 'wide';
@@ -99,7 +101,17 @@ type HomeProps = {
 };
 
 function Home({ onGameStart }: HomeProps) {
+  const navigate = useNavigate();
+
+  // ★追加: スマホでゲームリストを開いているかどうか
+  const [isMobileListOpen, setIsMobileListOpen] = useState(false);
+
+  // スマホで「メインモード」ボタンを押してリスト画面に遷移したか
+  const [isMobileModeSelection, setIsMobileModeSelection] = useState(false);
+
+  // モード選択モーダルの表示スイッチ
   const [showModeSelect, setShowModeSelect] = useState(false);
+
   // 夜モード管理
   const [isNight, setIsNight] = useState(false);
 
@@ -163,47 +175,38 @@ function Home({ onGameStart }: HomeProps) {
   }, []);
 
   return (
-    // theme-garden-bg に変更
     <div className="min-h-screen theme-garden-animate text-[#5D4037] p-8 flex flex-col items-center justify-center relative overflow-hidden font-hakoniwa">
       
-      {/* --- 背景デコレーション --- */}
+      {/* --- 背景デコレーション (常に表示) --- */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        
-        {/* ★夜だけ流れ星を表示 */}
         {isNight && <ShootingStars />}
-
-        {/* 雲（白くてふわふわ） */}
         <div className={`absolute top-10 left-0 animate-cloud-slow w-48 ${isNight ? 'opacity-10 text-white' : 'text-white/60'}`}>
-           <CloudIcon className="w-full h-full" />
+            <CloudIcon className="w-full h-full" />
         </div>
         <div className="absolute top-10 left-0 text-white/60 animate-cloud-slow w-48"><CloudIcon className="w-full h-full" /></div>
         <div className="absolute top-32 left-1/3 text-white/40 animate-cloud-medium w-32"><CloudIcon className="w-full h-full" /></div>
-        
-        {/* 地面の木（背景） */}
         <div className="absolute bottom-16 right-10 w-24 h-24 text-green-300 opacity-50"><TreeIcon className="w-full h-full"/></div>
         <div className="absolute bottom-20 left-10 w-32 h-32 text-green-400 opacity-40"><TreeIcon className="w-full h-full"/></div>
-
-        {/* 転がる積み木 */}
         {backgroundKeys.map((item) => (
-          <BouncingKey 
-            key={item.id}
-            {...item}
-          />
+          <BouncingKey key={item.id} {...item} />
         ))}
       </div> 
 
-      {/* --- メインコンテンツ --- */}
-      <div className="w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-12 items-center z-10">
+      {/* --- コンテンツエリア --- */}
+      
+      {/* 【A】通常ホーム画面 (PCは常に表示 / スマホは isMobileModeSelection が false の時だけ表示) 
+         スマホでボタンを押すと、このブロック全体が隠れます。
+      */}
+      <div className={`w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-12 items-center z-10 transition-opacity duration-300 ${isMobileModeSelection ? 'hidden md:grid' : 'grid'}`}>
         
-        {/* 左側エリア */}
+        {/* 左側エリア (タイトル等) */}
         <div className="space-y-10 text-center md:text-center">
           <header className="relative">
-            {/* タイトルロゴ */}
             <h1 className="text-6xl md:text-8xl font-black text-green-500 mb-2 drop-shadow-md text-stroke-garden tracking-tight">
               BRAIN<br/>GARDEN
             </h1>
             <p className={`text-xl font-bold tracking-widest mt-6 ivy-border-bottom ${isNight ? 'text-black-500' : 'text-[#556b2f]'}`}>
-               知識を育てるメモリースポーツ × タイピングゲーム
+              知識を育てるメモリースポーツ × タイピングゲーム
             </p>
           </header>
 
@@ -215,27 +218,33 @@ function Home({ onGameStart }: HomeProps) {
           </div>
         </div>
 
-        {/* 右側エリア (白い木の板) */}
+        {/* 右側エリア (ゲームメニュー) */}
         <div className="theme-white-wood-card p-10 relative">
           
-          {/* 上部の飾り: 葉っぱアイコン */}
-          <div className="absolute -top-6 -right-6 text-6xl animate-bounce"></div>
-
-          <h2 className="text-3xl font-bold mb-8 text-[#556b2f] flex items-center justify-center gap-3">
+          {/* PC用のタイトル */}
+          <h2 className="hidden md:flex text-3xl font-bold mb-8 text-[#556b2f] items-center justify-center gap-3">
             <span className="text-4xl animate-sparkle-spin-y-reverse">⭐</span> 
-            
             <div className="pt-2">
-              <span 
-                className="text-5xl ml-2 inline-block leading-none transform text-garden-logo"
-                data-text="メインモード">
+              <span className="text-5xl ml-2 inline-block leading-none transform text-garden-logo">
                 メインモード
               </span>
             </div>
             <span className="text-4xl animate-sparkle-spin-y-reverse">⭐</span> 
           </h2>
+
+          {/* ★スマホ用: 画面遷移するためのボタン (PCでは非表示) */}
+          <div className="md:hidden flex justify-center -mt-6">
+            <button 
+              onClick={() => setIsMobileModeSelection(true)}
+              className="w-80 bg-white/80 border-4 border-[#8B4513]/20 rounded-full py-5 shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-3 group">
+              <span className="text-xl animate-sparkle-spin-y-reverse">⭐</span>
+              <span className="text-xl font-black text-[#556b2f] tracking-wider">メインモード</span>
+              <span className="text-xl animate-sparkle-spin-y-reverse">⭐</span>
+            </button>
+          </div>
           
-          <div className="space-y-4">
-            {/* メインスタートボタン（緑の葉っぱ風） */}
+          {/* PC用: ゲームリスト (スマホではこのブロックは表示されない) */}
+          <div className="hidden md:block space-y-4">
             <button 
               onClick={() => setShowModeSelect(true)}
               className="w-full theme-leaf-btn p-2 group"
@@ -250,27 +259,64 @@ function Home({ onGameStart }: HomeProps) {
                 <div className="text-4xl group-hover:scale-125 transition-transform"></div>
               </div>
             </button>
-            
             <MenuButtonList text="2. 早押し画像クイズ" />
             <MenuButtonList text="3. 画像メモリー" />
             <MenuButtonList text="4. 単語メモリー" />
             <MenuButtonList text="5. 瞬間記憶" />
           </div>
+
         </div>
       </div>
 
-      {/* 地面 (芝生) */}
+
+      {/* 【B】スマホ専用: ゲーム選択画面 (isMobileModeSelection が true の時だけ表示) 
+         PCでは絶対に表示されません (md:hidden)。
+         背景はそのまま、ボタンだけが表示されます。
+      */}
+      {isMobileModeSelection && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 md:hidden animate-fade-in-up">
+           
+           {/* 戻るボタン (左上) */}
+           <button 
+             onClick={() => setIsMobileModeSelection(false)}
+             className="absolute top-6 left-6 w-12 h-12 bg-white/80 rounded-full shadow-md flex items-center justify-center text-2xl text-[#8B4513] font-bold active:scale-90 transition-transform"
+           >
+             &lt;
+           </button>
+
+           <div className="w-full max-w-md space-y-4">
+              <h2 className="text-3xl font-black text-center text-[#556b2f] mb-8 drop-shadow-sm">
+                ゲームを選択
+              </h2>
+
+              <button 
+                onClick={() => setShowModeSelect(true)}
+                className="w-full theme-leaf-btn p-4 group shadow-xl"
+              >
+                <div className="flex flex-col items-center">
+                  <span className="text-2xl font-black text-[#556b2f] group-hover:text-white">1. フラッシュタイピング</span>
+                  <span className="text-xs font-bold opacity-70 group-hover:text-white mt-1">まずはここから育てよう！</span>
+                </div>
+              </button>
+
+              <MenuButtonList text="2. 早押し画像クイズ" />
+              <MenuButtonList text="3. 画像メモリー" />
+              <MenuButtonList text="4. 単語メモリー" />
+              <MenuButtonList text="5. 瞬間記憶" />
+           </div>
+        </div>
+      )}
+
+      {/* 地面 */}
       <div className="absolute bottom-0 left-0 w-full h-16 theme-garden-ground z-20"></div>
 
       {/* モード選択モーダル */}
       {showModeSelect && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
           <div className="theme-white-wood-card p-8 max-w-lg w-full">
-            
-            <h3 className="text-3xl font-black mb-8 text-center text-[#FFFFFF]">
+            <h3 className="text-2xl font-black mb-8 text-center text-[#FFFFFF]">
               プレイスタイルを選択
             </h3>
-            
             <div className="grid gap-6">
               <button 
                 onClick={() => onGameStart('solo')}
@@ -278,7 +324,6 @@ function Home({ onGameStart }: HomeProps) {
               >
                 <span>ソロプレイ</span>
               </button>
-
               <button 
                 onClick={() => onGameStart('online')}
                 className="theme-flower-btn py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4"
@@ -286,10 +331,10 @@ function Home({ onGameStart }: HomeProps) {
                 <span>マルチプレイ</span>
               </button>
             </div>
-
+            {/* ★修正: やめるボタン（枠線表示 & 押下時ダーク化） */}
             <button 
               onClick={() => setShowModeSelect(false)}
-              className="mt-8 text-[#8d6e63] font-bold hover:bg-[#efebe9] w-full py-3 rounded-xl transition border-2 border-transparent hover:border-[#d7ccc8]"
+              className="mt-8 bg-white text-[#8d6e63] font-bold w-full py-3 rounded-xl border-2 border-[#d7ccc8] hover:bg-[#efebe9] active:bg-[#d7ccc8] active:text-white transition-all duration-100 active:scale-95 shadow-sm"
             >
               やめる
             </button>
@@ -302,9 +347,8 @@ function Home({ onGameStart }: HomeProps) {
       </footer>
     </div>
   );
-}
+};
 
-// 木の看板ボタン
 function MenuButton({ text, sub }: { text: string; sub: string }) {
   return (
     <button className="theme-wood-btn p-4 flex flex-col items-center justify-center text-center">
@@ -314,7 +358,6 @@ function MenuButton({ text, sub }: { text: string; sub: string }) {
   );
 }
 
-// ロックされたボタン (紙っぽい質感)
 function MenuButtonList({ text }: { text: string }) {
   return (
     <button className="w-full bg-[#f3f4f6] text-gray-400 font-bold py-4 px-6 rounded-xl text-left border-2 border-dashed border-gray-300 flex justify-between items-center cursor-not-allowed">
