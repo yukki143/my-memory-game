@@ -2,6 +2,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+
 // 木のアイコン (SVG)
 const TreeIcon = ({ className }: { className: string }) => (
   <svg className={className} viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
@@ -17,7 +18,7 @@ const CloudIcon = ({ className }: { className: string }) => (
   </svg>
 );
 
-// --- 流れ星コンポーネント (ここが抜けていました！) ---
+// --- 流れ星コンポーネント ---
 const ShootingStars = () => {
   const stars = useMemo(() => {
     return Array.from({ length: 5 }).map((_, i) => ({
@@ -212,7 +213,7 @@ function Home({ onGameStart }: HomeProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <MenuButton text="遊び方" sub="How to Play"/>
-            <MenuButton text="暗記法" sub="Method"/>
+            <MenuButton text="設定" sub="Method"/>
             <MenuButton text="練習" sub="Training"/>
             <MenuButton text="クリエイト" sub="Make Stage"/>
           </div>
@@ -294,7 +295,7 @@ function Home({ onGameStart }: HomeProps) {
                 className="w-full theme-leaf-btn p-4 group shadow-xl"
               >
                 <div className="flex flex-col items-center">
-                  <span className="text-2xl font-black text-[#556b2f] group-hover:text-white">1. フラッシュタイピング</span>
+                  <span className="text-2xl font-black text-[#556b2f] group-hover:text-white">1. フラッシュメモリー</span>
                   <span className="text-xs font-bold opacity-70 group-hover:text-white mt-1">まずはここから育てよう！</span>
                 </div>
               </button>

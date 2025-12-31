@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import GamePC from './GamePC';
 import GameMobile from './GameMobile';
+import ForestPath from './ForestPath';
 
 type RankEntry = {
   name: string;
@@ -12,14 +13,20 @@ type SoloModeProps = {
 };
 
 function SoloMode({ onBack }: SoloModeProps) {
-  // 画面管理: ready(待機) -> playing(ゲーム中) -> finished(結果/ランキング)
-  const [gameState, setGameState] = useState<'ready' | 'playing' | 'finished'>('ready');
+  // 画面管理: ready(待機) -> countdown(カウントダウン) -> playing(ゲーム中) -> finished(結果)
+  const [gameState, setGameState] = useState<'ready' | 'countdown' | 'playing' | 'finished'>('ready');
   const [score, setScore] = useState(0);
   const [startTime, setStartTime] = useState(0);
   const [clearTime, setClearTime] = useState(0);
   const [playerName, setPlayerName] = useState("Player");
   const [ranking, setRanking] = useState<RankEntry[]>([]);
+
+  // カウントダウン用
+  const [countdownValue, setCountdownValue] = useState(3);
   
+  // リセット用（リトライ時に問題を再読み込みさせるため）
+  const [resetKey, setResetKey] = useState(0);
+
   // スマホ判定
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -30,14 +37,47 @@ function SoloMode({ onBack }: SoloModeProps) {
 
   const GOAL_SCORE = 10; // 10問正解でクリア
 
-  // ゲーム開始
-  const handleStart = () => {
+  // ■ 1. スタート処理（カウントダウン開始）
+  const startCountdown = () => {
+    if (playerName.trim() === "") {
+        alert("おなまえを入力してね！");
+        return;
+    }
     setScore(0);
-    setGameState('playing');
-    setStartTime(Date.now());
+    setGameState('countdown');
+    setCountdownValue(3);
   };
 
-  // 正解したとき
+  // ■ 2. キーボード操作（Enter/Spaceでスタート）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (gameState === 'ready') {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault(); // スクロール等を防ぐ
+                startCountdown();
+            }
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameState, playerName]); // playerNameが変わるたびにリスナー更新
+
+  // ■ 3. カウントダウンロジック
+  useEffect(() => {
+    if (gameState === 'countdown' && countdownValue > 0) {
+      const timer = setTimeout(() => {
+        setCountdownValue((prev) => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else if (gameState === 'countdown' && countdownValue === 0) {
+      // 0になったらゲーム開始 & 計測開始
+      setGameState('playing');
+      setStartTime(Date.now());
+      setResetKey(prev => prev + 1); // ゲームコンポーネントをリセット
+    }
+  }, [gameState, countdownValue]);
+
+  // ■ 4. 正解したとき
   const handleScore = () => {
     const newScore = score + 1;
     setScore(newScore);
@@ -47,7 +87,12 @@ function SoloMode({ onBack }: SoloModeProps) {
     }
   };
 
-  // ゲーム終了
+  // ソロモードでは不正解時のペナルティは特になし（必要ならここで処理）
+  const handleWrong = () => {
+      // console.log("Miss!");
+  };
+
+  // ■ 5. ゲーム終了
   const finishGame = async () => {
     const time = (Date.now() - startTime) / 1000; // 秒に変換
     setClearTime(time);
@@ -57,124 +102,160 @@ function SoloMode({ onBack }: SoloModeProps) {
     fetchRanking();
   };
 
+  // ■ 6. リトライ
+  const handleRetry = () => {
+      setScore(0);
+      setGameState('ready'); // 名前入力画面に戻る（あるいは直接startCountdownでも可）
+  };
+
   // ランキングを取得
   const fetchRanking = async () => {
-    const res = await fetch("http://127.0.0.1:8000/api/ranking");
-    const data = await res.json();
-    setRanking(data);
+    try {
+        const res = await fetch("http://127.0.0.1:8000/api/ranking");
+        const data = await res.json();
+        setRanking(data);
+    } catch (e) {
+        console.error("ランキング取得失敗", e);
+    }
   };
 
   // スコア送信
   const submitScore = async () => {
-    await fetch("http://127.0.0.1:8000/api/ranking", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: playerName, time: clearTime }),
-    });
-    // 送信後に最新ランキングを再取得
-    fetchRanking();
-    alert("ランキングに登録しました！");
+    try {
+        await fetch("http://127.0.0.1:8000/api/ranking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: playerName, time: clearTime }),
+        });
+        fetchRanking();
+        alert("ランキングに登録しました！");
+    } catch (e) {
+        alert("送信に失敗しました...");
+    }
   };
 
-  return (
-    // 背景を青空に
-    <div className="w-full h-screen theme-mario-sky text-slate-800 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* ヘッダー: 戻るボタンをポップに */}
-      <div className="absolute top-4 left-4 z-20">
-        <button onClick={onBack} className="theme-mario-brown-btn px-6 py-3 rounded-full text-sm font-bold shadow-lg">
-          ← もどる
+
+return (
+    // 外枠: relative にして中身を重ねられるようにする
+    <div className="relative w-full h-screen overflow-hidden text-[#5D4037]">
+      
+      {/* ★背景: 森の道アニメーション (一番奥に配置) */}
+      <ForestPath overlayOpacity={0.2} />
+
+      {/* ヘッダー: 戻るボタン */}
+      <div className="absolute top-4 left-4 z-50">
+        <button onClick={onBack} className="theme-wood-btn px-6 py-3 rounded-xl text-sm font-bold shadow-lg font-pop flex items-center gap-2">
+          <span>←</span> <span>もどる</span>
         </button>
       </div>
 
-      <div className="z-10 w-full flex flex-col items-center">
-      {/* --- 待機画面 (READY) --- */}
-      {gameState === 'ready' && (
-        <div className="text-center animate-fade-in-up theme-mario-card p-10 max-w-2xl">
-          <h1 className="text-5xl md:text-7xl font-black text-green-500 mb-4 drop-shadow-[0_3px_0_white]">
-            TIME ATTACK!
-          </h1>
-          <p className="text-xl mb-8 text-blue-600 font-bold">10問クリアまでのタイムを競おう！</p>
-          
-          <div className="mb-8">
-            <label className="block text-sm mb-2 text-blue-600 font-bold">おなまえ</label>
-            <input 
-              value={playerName} 
-              onChange={(e) => setPlayerName(e.target.value)}
-              className="bg-blue-50 border-4 border-blue-200 rounded-xl px-4 py-3 text-center text-2xl font-black w-64 focus:outline-none focus:border-green-400 text-slate-800"
-            />
-          </div>
+      {/* メインコンテンツ: z-10 で背景より手前に表示 */}
+      <div className="relative z-10 w-full h-full flex flex-col items-center justify-center p-4">
+        
+        {/* --- 待機画面 (READY) --- */}
+        {gameState === 'ready' && (
+          <div className="text-center animate-fade-in-up theme-wood-box p-10 max-w-2xl shadow-2xl">
+            <h1 className="text-5xl md:text-7xl mb-4 text-battle-logo font-hakoniwa" data-text="TIME ATTACK!">
+              TIME ATTACK!
+            </h1>
+            <p className="text-xl mb-8 font-bold font-hakoniwa text-[#5d4037]">10問クリアまでのタイムを競おう！</p>
+            
+            <div className="mb-8">
+              <label className="block text-sm mb-2 font-bold font-hakoniwa">おなまえ</label>
+              <input 
+                value={playerName} 
+                onChange={(e) => setPlayerName(e.target.value)}
+                className="bg-[#fff8e1] border-4 border-[#8d6e63] rounded-xl px-4 py-3 text-center text-2xl font-black w-64 focus:outline-none focus:border-[#5d4037] text-[#5d4037] font-pop"
+              />
+            </div>
 
-          <button 
-            onClick={handleStart}
-            className="theme-mario-green-btn text-2xl font-black py-4 px-16 rounded-full shadow-xl animate-pulse"
-          >
-            スタート！
-          </button>
-        </div>
-      )}
-
-      {/* --- ゲーム中 (PLAYING) --- */}
-      {gameState === 'playing' && (
-        <div className="w-full flex flex-col items-center">
-          {/* スコア表示 (ポップなデザイン) */}
-          <div className="flex justify-between w-full max-w-[400px] md:max-w-2xl mb-4 px-4 bg-white/70 rounded-full p-2 border-4 border-white shadow-sm">
-            <div className="text-xl font-bold text-blue-600 flex items-center"><span className="text-2xl mr-2">🚩</span>ゴール: {GOAL_SCORE}</div>
-            <div className="text-3xl font-black text-orange-500">{score} <span className="text-xl text-blue-600">/ {GOAL_SCORE}</span></div>
-          </div>
-
-          {/* ゲーム画面コンポーネント (黄色い枠) */}
-          <div className="bg-white rounded-3xl overflow-hidden shadow-[0_10px_0_rgba(0,0,0,0.2)] text-black 
-                                border-8 border-yellow-400
-                                w-[85vw] max-w-[400px] aspect-[9/16] 
-                                md:w-auto md:max-w-none md:h-[65vh] md:aspect-[16/9]">
-            {isMobile ? (
-              <GameMobile onScore={handleScore} />
-            ) : (
-              <GamePC onScore={handleScore} />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* --- 結果 & ランキング (FINISHED) --- */}
-      {gameState === 'finished' && (
-        <div className="theme-mario-card p-8 w-full max-w-2xl text-center animate-bounce-in">
-          <h2 className="text-3xl font-black text-orange-500 mb-2 drop-shadow-sm">🎉 クリアおめでとう！</h2>
-          <div className="text-7xl font-black mb-6 text-blue-600 drop-shadow-[0_3px_0_rgba(0,0,0,0.1)]">{clearTime.toFixed(2)} <span className="text-3xl">びょう</span></div>
-
-          {/* スコア送信ボタン */}
-          <div className="mb-8 flex flex-col md:flex-row justify-center gap-4">
-            <button onClick={submitScore} className="theme-mario-green-btn py-3 px-8 rounded-xl font-black text-lg">
-              ランキングに登録する！
-            </button>
-            <button onClick={() => setGameState('ready')} className="theme-mario-brown-btn py-3 px-8 rounded-xl font-black text-lg">
-              もう一度あそぶ
+            <button 
+              onClick={startCountdown}
+              className="theme-leaf-btn text-2xl font-black py-4 px-16 rounded-full shadow-xl font-pop"
+            >
+              スタート！
             </button>
           </div>
+        )}
 
-          {/* ランキング表 (白い紙風) */}
-          <div className="text-left bg-blue-50 rounded-xl p-4 max-h-60 overflow-y-auto border-4 border-blue-100 shadow-inner">
-            <h3 className="text-xl font-bold mb-4 border-b-2 border-blue-200 pb-2 text-blue-600 flex items-center">🏆 トップランキング</h3>
-            <table className="w-full">
-              <tbody>
-                {ranking.map((rank, index) => (
-                  <tr key={index} className="border-b border-blue-100 text-lg text-slate-700">
-                    <td className="py-2 text-orange-500 font-black w-14 text-xl">#{index + 1}</td>
-                    <td className="py-2 font-bold truncate max-w-[150px]">{rank.name}</td>
-                    <td className="py-2 text-right font-mono font-bold text-blue-600">{rank.time.toFixed(2)}s</td>
-                  </tr>
-                ))}
-                {ranking.length === 0 && (
-                  <tr><td colSpan={3} className="text-center text-blue-400 py-4 font-bold">まだデータがないよ！</td></tr>
-                )}
-              </tbody>
-            </table>
+        {/* --- カウントダウン (COUNTDOWN) --- */}
+        {gameState === 'countdown' && (
+             <div className="flex flex-col items-center justify-center">
+                <div className="text-3xl md:text-4xl font-bold text-white drop-shadow-md font-hakoniwa mb-4">READY?</div>
+                <div className="text-5xl md:text-5xl font-black text-[#ffca28] drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)] font-pop scale-150 pt-2">
+                    {countdownValue > 0 ? countdownValue : "START!"}
+                </div>
+            </div>
+        )}
+
+        {/* --- ゲーム中 (PLAYING) --- */}
+        {gameState === 'playing' && (
+          <div className="w-full flex flex-col items-center">
+            {/* スコア表示 */}
+            <div className="flex justify-between w-full max-w-[400px] md:max-w-2xl mb-4 px-6 bg-[#a7f3d0] rounded-full p-2 border-4 border-[#059669] shadow-lg text-[#064e3b]">
+              <div className="text-xl font-bold flex items-center font-pop"><span className="text-2xl mr-2">🚩</span>ゴール: {GOAL_SCORE}</div>
+              <div className="text-3xl font-black font-pop">{score} <span className="text-xl">/ {GOAL_SCORE}</span></div>
+            </div>
+
+            {/* ゲーム画面コンポーネント */}
+            <div className="bg-white/95 rounded-3xl overflow-hidden shadow-2xl text-black 
+                                  border-8 border-[#d4a373]
+                                  w-[85vw] max-w-[400px] aspect-[9/16] 
+                                  md:w-auto md:max-w-none md:h-[65vh] md:aspect-[16/9]">
+              {isMobile ? (
+                <GameMobile 
+                    onScore={handleScore} 
+                    onWrong={handleWrong} // ソロでは何もしないが型定義のため渡す
+                    resetKey={resetKey} 
+                    isSoloMode={true}
+                />
+              ) : (
+                <GamePC 
+                    onScore={handleScore} 
+                    onWrong={handleWrong}
+                    resetKey={resetKey}
+                    isSoloMode={true}
+                />
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* --- 結果 & ランキング (FINISHED) --- */}
+        {gameState === 'finished' && (
+          <div className="theme-wood-box p-8 w-full max-w-2xl text-center animate-bounce-in shadow-2xl">
+            <h2 className="text-3xl font-black text-[#d97706] mb-2 drop-shadow-sm font-pop">🎉 クリアおめでとう！</h2>
+            <div className="text-7xl font-black mb-6 text-[#5d4037] drop-shadow-md font-pop">{clearTime.toFixed(2)} <span className="text-3xl font-hakoniwa">秒</span></div>
+
+            <div className="mb-8 flex flex-col md:flex-row justify-center gap-4">
+              <button onClick={submitScore} className="theme-leaf-btn py-3 px-8 rounded-xl font-black text-lg font-pop">
+                ランキングに登録する
+              </button>
+              <button onClick={handleRetry} className="theme-wood-btn py-3 px-8 rounded-xl font-black text-lg font-pop">
+                リトライ
+              </button>
+            </div>
+
+            <div className="text-left bg-[#fff8e1] rounded-xl p-4 max-h-60 overflow-y-auto border-4 border-[#d4a373] shadow-inner">
+              <h3 className="text-xl font-bold mb-4 border-b-2 border-[#d4a373] pb-2 text-[#5d4037] flex items-center font-hakoniwa">🏆 トップランキング</h3>
+              <table className="w-full">
+                <tbody>
+                  {ranking.map((rank, index) => (
+                    <tr key={index} className="border-b border-[#ebdcb2] text-lg text-[#5d4037]">
+                      <td className="py-2 text-[#d97706] font-black w-14 text-xl font-pop">#{index + 1}</td>
+                      <td className="py-2 font-bold truncate max-w-[150px] font-hakoniwa">{rank.name}</td>
+                      <td className="py-2 text-right font-mono font-bold text-[#8d6e63]">{rank.time.toFixed(2)}s</td>
+                    </tr>
+                  ))}
+                  {ranking.length === 0 && (
+                    <tr><td colSpan={3} className="text-center text-[#8d6e63] py-4 font-bold font-hakoniwa">まだデータがないよ！</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
-      {/* 地面 */}
-      <div className="absolute bottom-0 left-0 w-full h-12 theme-mario-ground-bar z-0"></div>
     </div>
   );
 }

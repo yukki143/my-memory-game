@@ -150,7 +150,7 @@
 
 /* UI: 白い木の板（メインカード） */
 /* .theme-white-wood-card {
-    @apply bg-[#fffbeb] border-4 border-[#d4a373] rounded-3xl shadow-xl;
+    @apply bg-[#fffbeb]/60 border-4 border-[#d4a373] rounded-3xl shadow-xl;
     background-image: repeating-linear-gradient(0deg, transparent, transparent 29px, #faebd7 30px);
 } */
 
@@ -199,6 +199,51 @@
 
 /* キラッと光るエフェクト (光を優しく調整) */
 .text-garden-logo::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%; z-index: 20;
+  
+  /* 光のグラデーション */
+  background: linear-gradient(
+    120deg, 
+    transparent 45%, 
+    rgba(255,255,255,1.0) 50%, 
+    transparent 55%
+  );
+  background-size: 200% 100%;
+  
+  /* ★重要: これを追加！繰り返しを禁止します */
+  background-repeat: no-repeat;
+  
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: 0;
+  
+  /* アニメーション適用 */
+  animation: shine-interval 10s ease-in-out infinite;
+}
+
+/* ガーデンロゴ用の柔らかいレインボー */
+.text-battle-logo {
+  position: relative;
+  display: inline-block;
+  
+  /* フォント指定 */
+  font-family: 'Kiwi Maru', serif; 
+  font-weight: 700;
+  
+  /* 色: 優しい森の緑 */
+  color: #a72323; /* Lime-600 */
+  
+  /* フチ: 白で太めに囲ってシールっぽく */
+  -webkit-text-stroke: 1px #a72323;
+  paint-order: stroke fill;
+  
+}
+
+/* キラッと光るエフェクト (光を優しく調整) */
+.text-battle-logo::after {
   content: attr(data-text);
   position: absolute;
   top: 0; left: 0; width: 100%; height: 100%; z-index: 20;
@@ -361,21 +406,4 @@
     color: #5D4037;
     --grid-color: rgba(0, 0, 0, 0.15); /* 線: 薄い黒に戻す */
   }
-}
-
-.theme-garden-animate {
-  /* 変数の初期値をセット（念のため） */
-  --grid-color: rgba(0, 0, 0, 0.05);
-
-  /* 背景パターン: 色指定の部分を var(--grid-color) に置き換え */
-  background-image: 
-    linear-gradient(var(--grid-color) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
-  
-  background-size: 40px 40px;
-  background-position: center bottom;
-  
-  /* ★修正: infinite にして無限ループさせる */
-  /* 名前を day-to-night から day-cycle に変更しました */
-  animation: day-cycle 60s linear infinite;
 }

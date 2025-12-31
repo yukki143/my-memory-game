@@ -1,0 +1,82 @@
+/* frontend/src/components/ForestPath.css */
+
+.forest-path-container {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -10;
+  overflow: hidden;
+  background-color: #000;
+}
+
+.forest-bg-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.atmosphere-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  animation: skyCycle 60s infinite linear;
+  pointer-events: none;
+}
+
+.stars-container {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  /* 夜の時間帯だけ表示 */
+  animation: starVisibility 60s infinite linear;
+}
+
+.bottom-green-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 60px;
+  background: linear-gradient(to top, #14532d 0%, transparent 100%);
+  border-bottom: 8px solid #4ade80;
+  z-index: 4;
+}
+
+/* --- アニメーション定義 --- */
+
+@keyframes skyCycle {
+  0% { background-color: rgba(135, 206, 235, 0.2); }   /* 昼 */
+  35% { background-color: rgba(253, 184, 19, 0.3); }   /* 夕方 */
+  55% { background-color: rgba(20, 24, 82, 0.5); }     /* 夜 */
+  95% { background-color: rgba(20, 24, 82, 0.5); }     /* 夜明け前 */
+  100% { background-color: rgba(135, 206, 235, 0.2); } /* 朝 */
+}
+
+@keyframes starVisibility {
+  0% { opacity: 0; }
+  50% { opacity: 0; }
+  60% { opacity: 1; } /* 夜になったら表示 */
+  90% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ★修正: キラキラ光る星 */
+.twinkle-star {
+  position: absolute;
+  border-radius: 50%;
+  /* background-color は JS側でランダム指定するため削除 */
+  opacity: 0.8;
+  animation: twinkling 4s infinite ease-in-out alternate;
+}
+
+/* ゆっくり明滅するアニメーション */
+@keyframes twinkling {
+  0% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 0.3; transform: scale(0.8); }
+}
