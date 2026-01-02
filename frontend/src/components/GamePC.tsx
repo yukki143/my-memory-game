@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 
+// ★修正: 引数の型定義を変更
 type GamePCProps = {
   onScore?: () => void;
-  onWrong?: () => void;
+  onWrong?: (problem: Problem) => void; // 間違えた問題を渡す
+  onTypo?: (expectedChar: string) => void; // 打つべきだった文字を渡す
   resetKey: number;
   isSoloMode?: boolean;
 };
@@ -12,7 +14,7 @@ type Problem = {
   kana: string;
 };
 
-function GamePC({ onScore, onWrong, resetKey, isSoloMode = false }: GamePCProps) {
+function GamePC({ onScore, onWrong, onTypo, resetKey, isSoloMode = false }: GamePCProps) {
   const [gameState, setGameState] = useState<'memorize' | 'answer' | 'waiting'>('memorize');
   const [problem, setProblem] = useState<Problem | null>(null);
   const [inputVal, setInputVal] = useState("");
@@ -97,6 +99,8 @@ function GamePC({ onScore, onWrong, resetKey, isSoloMode = false }: GamePCProps)
         setIsError(false);
     } else {
         triggerErrorEffect();
+        const expectedChar = problem.text.charAt(inputVal.length);
+        if (onTypo && expectedChar) onTypo(expectedChar);
     }
   };
 
@@ -136,7 +140,8 @@ function GamePC({ onScore, onWrong, resetKey, isSoloMode = false }: GamePCProps)
       // ■ 不正解 ---------------------
       setOverlayMark(false);
       triggerErrorEffect();
-      if (onWrong) onWrong();
+      
+      if (onWrong) onWrong(problem);
 
       if (isSoloMode) {
           // ソロモード：次へ進む

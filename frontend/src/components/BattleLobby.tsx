@@ -47,7 +47,7 @@ function BattleLobby() {
     <div className="min-h-screen relative flex items-center justify-center overflow-hidden">
       
       {/* ★背景コンポーネント (ロビーなので 'walk' モード) */}
-      <ForestPath speed="walk" overlayOpacity={0.4} />
+      <ForestPath overlayOpacity={0.4} />
 
       {/* メインコンテンツ (z-indexで手前に表示) */}
       <div className="z-10 w-full max-w-2xl px-4">

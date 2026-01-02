@@ -10,10 +10,11 @@ type ApiResponse = {
   options: Problem[];
 };
 
+// ★修正: onWrong の型定義を変更
 type Props = {
   onScore: () => void;
-  onWrong: () => void;     // 不正解通知
-  resetKey: number;        // 強制リセット信号
+  onWrong: (problem: Problem) => void;
+  resetKey: number;
   isSoloMode?: boolean;
 };
 
@@ -94,7 +95,7 @@ function GameMobile({ onScore, onWrong, resetKey, isSoloMode = false }: Props) {
     } else {
       // ■ 不正解...
       setOverlayMark(false); // ✕を表示
-      onWrong();             // 親に「間違えた」と通知
+      onWrong(currentProblem);             // 親に「間違えた」と通知
       if (isSoloMode) {
           setTimeout(() => loadProblem(), 400);
       } else {
