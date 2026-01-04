@@ -13,6 +13,8 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import uuid
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 # 自作モジュールのインポート
 from . import models, schemas, database
@@ -183,9 +185,9 @@ def save_ranking(data):
 #  API エンドポイント
 # ==========================
 
-@app.get("/")
-def read_root():
-    return {"message": "Hello, Brain Garden API!"}
+# @app.get("/")
+# def read_root():
+#     return {"message": "Hello, Brain Garden API!"}
 
 # ランキング関連
 @app.get("/api/ranking", response_model=List[RankEntry])
@@ -520,3 +522,17 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                 if count <= 0:
                     task = asyncio.create_task(delayed_room_cleanup(room_id))
                     manager.cleanup_tasks[room_id] = task
+
+# 2. フロントエンド配信設定をここに追加
+frontend_path = os.path.join(os.getcwd(), "frontend/dist")
+
+if os.path.exists(frontend_path):
+    # 先に定義した API ルート以外のすべてのアクセスを React の dist フォルダに向けます
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+    
+    # ページをリロードした際に 404 になるのを防ぐ設定（React Router用）
+    @app.exception_handler(404)
+    async def not_found_exception_handler(request, exc):
+        return FileResponse(os.path.join(frontend_path, "index.html"))
+else:
+    print(f"Warning: frontend_path not found at {frontend_path}")
