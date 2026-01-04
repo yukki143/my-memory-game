@@ -105,7 +105,12 @@ function BattleMode() {
   }, []);
 
   const joinRoom = () => {
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${roomId}/${playerId}`);
+    // ★修正: 環境変数からURLを取得し、ws/wssプロトコルに変換するロジックを追加
+    const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+    // http -> ws, https -> wss に置換
+    const WS_BASE = API_BASE.replace(/^http/, 'ws');
+    
+    const ws = new WebSocket(`${WS_BASE}/ws/${roomId}/${playerId}`);
     socketRef.current = ws;
     
     ws.onopen = () => {
