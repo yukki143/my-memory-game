@@ -8,7 +8,7 @@ import Login from './components/Login';
 import Register from './components/Register';     
 import CreateMemorySet from './components/CreateMemorySet'; 
 import MemorySetList from './components/MemorySetList';
-import { BgmPlayer } from './components/BgmPlayer.tsx';
+import { BgmPlayer } from './components/BgmPlayer';
 import { type GameSettings } from './types';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";

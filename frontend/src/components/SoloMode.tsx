@@ -232,14 +232,12 @@ function SoloMode({ onBack }: SoloModeProps) {
   };
 
   const getMemoryRank = (score: number, miss: number) => {
-      const total = score + miss;
-      if (total === 0) return '-';
-      const percentage = (score / total) * 100;
-      if (percentage === 100) return 'S';
-      if (percentage >= 90) return 'A';
-      if (percentage >= 80) return 'B';
-      if (percentage >= 70) return 'C';
-      if (percentage >= 60) return 'D';
+      if (score === 0 && miss === 0) return '-';
+      if (miss === 0) return 'S';
+      if (miss === 1) return 'A';
+      if (miss <= 3) return 'B';
+      if (miss === 4) return 'C';
+      if (miss === 5) return 'D';
       return 'E';
   };
 
