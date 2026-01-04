@@ -1,25 +1,28 @@
 # backend/app/main.py
 import asyncio
+import os
+import json
+import random
+import uuid
+from typing import List, Dict, Optional, Set
+from datetime import timedelta, datetime
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from passlib.context import CryptContext
-from datetime import timedelta, datetime
-from typing import List, Dict, Optional, Set
-import random
-import json
-import os
-from dotenv import load_dotenv
-from pydantic import BaseModel
-import uuid
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
-# 自作モジュールのインポート
+# 自作モジュール
 from . import models, schemas, database
 from .database import engine
 from .manager import manager
+# ★追加: 新しいファイルからのインポート
+from .dependencies import get_db, get_current_user, create_access_token, get_password_hash, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
+from .routers import memory_sets 
 
 load_dotenv()
 
@@ -29,13 +32,15 @@ models.Base.metadata.create_all(bind=engine)
 # --- FastAPIアプリ定義 ---
 app = FastAPI()
 
+# ★追加: ルーターの登録
+app.include_router(memory_sets.router)
+
 # --- CORS設定 ---
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://braingarden.onrender.com",
 ]
-
 origin_regex = r"^http://(localhost|127\.0\.0\.1):517\d$"
 
 app.add_middleware(
@@ -48,53 +53,8 @@ app.add_middleware(
 )
 
 # ==========================
-#  認証・DB設定
-# ==========================
-
-SECRET_KEY = os.getenv("SECRET_KEY", "YOUR_SECRET_KEY_HERE")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1日
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-def get_db():
-    db = database.SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
-
-def get_password_hash(password):
-    return pwd_context.hash(password)
-
-def create_access_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    from jose import jwt
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    from jose import jwt, JWTError
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    user = db.query(models.User).filter(models.User.username == username).first()
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
-
-# ==========================
-#  ゲーム用データモデル・変数
+#  ゲーム用データモデル・変数 (WebSocket/Room用)
+#  ※Room管理はstatefulなためmainに残しています
 # ==========================
 
 class RoomInfo(BaseModel):
@@ -123,15 +83,11 @@ class VerifyPasswordRequest(BaseModel):
     roomId: str
     password: str
 
-# RankEntry は schemas.py に移動しました
-
 # メモリ内データ（ルーム管理用）
 active_rooms: Dict[str, RoomInfo] = {}
 room_passwords: Dict[str, str] = {}
 room_owner_tokens: Dict[str, str] = {}
 room_clients: Dict[str, Set[str]] = {}
-
-# ★削除: RANKING_FILE 変数と load/save 関数は不要になりました
 
 DEFAULT_MEMORY_SETS = {
     "default": [
@@ -168,8 +124,7 @@ DEFAULT_MEMORY_SETS = {
 #  API エンドポイント
 # ==========================
 
-# ランキング関連
-# ★変更: DBから取得するように修正
+# ランキング関連 (DB使用)
 @app.get("/api/ranking", response_model=List[schemas.RankEntry])
 def get_ranking(set_id: str, win_score: int, condition_type: str, db: Session = Depends(get_db)):
     results = db.query(models.Ranking).filter(
@@ -179,7 +134,6 @@ def get_ranking(set_id: str, win_score: int, condition_type: str, db: Session = 
     ).order_by(models.Ranking.time.asc()).limit(10).all()
     return results
 
-# ★変更: DBに保存するように修正
 @app.post("/api/ranking")
 def post_ranking(entry: schemas.RankEntry, db: Session = Depends(get_db)):
     new_rank = models.Ranking(
@@ -219,12 +173,13 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @app.get("/api/users/me", response_model=schemas.UserResponse)
 def read_users_me(current_user: models.User = Depends(get_current_user)):
+    # ユーザー情報レスポンスの整形
     formatted_sets = []
     for s in current_user.memory_sets:
         formatted_sets.append(schemas.MemorySetResponse(
             id=s.id,
             title=s.title,
-            words=json.loads(s.words_json),
+            words=json.loads(s.words_json) if s.words_json else [],
             owner_id=s.owner_id,
             memorize_time=s.memorize_time,
             questions_per_round=s.questions_per_round,
@@ -238,67 +193,9 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
         memory_sets=formatted_sets
     )
 
-# メモリーセット関連
-@app.post("/api/my-sets", response_model=schemas.MemorySetResponse)
-def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    words_json_str = json.dumps([w.dict() for w in item.words], ensure_ascii=False)
-    new_set = models.MemorySet(
-        title=item.title, 
-        words_json=words_json_str, 
-        owner_id=current_user.id,
-        memorize_time=item.memorize_time,
-        questions_per_round=item.questions_per_round,
-        win_score=item.win_score,
-        condition_type=item.condition_type,
-        order_type=item.order_type
-    )
-    db.add(new_set)
-    db.commit()
-    db.refresh(new_set)
-    return schemas.MemorySetResponse(
-        id=new_set.id, 
-        title=new_set.title, 
-        words=json.loads(new_set.words_json), 
-        owner_id=new_set.owner_id,
-        memorize_time=new_set.memorize_time,
-        questions_per_round=new_set.questions_per_round,
-        win_score=new_set.win_score,
-        condition_type=new_set.condition_type,
-        order_type=new_set.order_type
-    )
+# ★メモリーセット関連（my-sets, sets）のAPIは routers/memory_sets.py に移動しました
 
-@app.get("/api/my-sets", response_model=List[schemas.MemorySetResponse])
-def read_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sets = db.query(models.MemorySet).filter(models.MemorySet.owner_id == current_user.id).all()
-    results = []
-    for s in sets:
-        results.append(schemas.MemorySetResponse(
-            id=s.id, 
-            title=s.title, 
-            words=json.loads(s.words_json), 
-            owner_id=s.owner_id,
-            memorize_time=s.memorize_time,
-            questions_per_round=s.questions_per_round,
-            win_score=s.win_score,
-            condition_type=s.condition_type,
-            order_type=s.order_type
-        ))
-    return results
-
-@app.get("/api/sets")
-def get_memory_sets(db: Session = Depends(get_db)):
-    response_sets = [
-        {"id": "default", "name": "基本セット (フルーツ)"},
-        {"id": "programming", "name": "プログラミング用語"},
-        {"id": "animals", "name": "動物の名前"},
-        {"id": "english_hard", "name": "超難問英単語"},
-    ]
-    db_sets = db.query(models.MemorySet).all()
-    for s in db_sets:
-        response_sets.append({"id": str(s.id), "name": s.title})
-    return response_sets
-
-# 問題取得 API
+# 問題取得 API (ゲームロジック依存のためmainに残存)
 @app.get("/api/problem")
 def get_problem(
     room_id: Optional[str] = None, 
@@ -317,9 +214,11 @@ def get_problem(
     order_type = "random"
     target_problems = DEFAULT_MEMORY_SETS["default"]
 
+    # 1. デフォルトセットから探す
     if target_set_id in DEFAULT_MEMORY_SETS:
         target_problems = DEFAULT_MEMORY_SETS[target_set_id]
     else:
+        # 2. DBから探す
         if str(target_set_id).isdigit():
             db_id = int(target_set_id)
             db_set = db.query(models.MemorySet).filter(models.MemorySet.id == db_id).first()
@@ -349,6 +248,7 @@ def get_problem(
             weighted_pool.extend([p] * weight)
         correct = rng.choice(weighted_pool)
     else:
+        # random
         correct = rng.choice(target_problems)
     
     others = [p for p in target_problems if p["text"] != correct["text"]]
