@@ -1,5 +1,5 @@
 # backend/app/models.py
-from sqlalchemy import Column, Integer, String, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float
 from sqlalchemy.orm import relationship
 from .database import Base
 from sqlalchemy.dialects.postgresql import JSONB
@@ -29,8 +29,19 @@ class MemorySet(Base):
     win_score = Column(Integer, default=10)
     condition_type = Column(String, default="score")
     
-    # ★追加: 出題順序 (random: ランダム / review: 苦手優先 / sequential: 順番)
+    # 出題順序 (random: ランダム / review: 苦手優先 / sequential: 順番)
     order_type = Column(String, default="random") 
 
     owner_id = Column(Integer, ForeignKey("users.id"))
     owner = relationship("User", back_populates="memory_sets")
+
+# ★追加: ランキングテーブル
+class Ranking(Base):
+    __tablename__ = "rankings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)
+    time = Column(Float)
+    set_id = Column(String, index=True)
+    win_score = Column(Integer)
+    condition_type = Column(String)

@@ -15,7 +15,6 @@ class MemorySetBase(BaseModel):
     questions_per_round: int = 1
     win_score: int = 10
     condition_type: str = "score"
-    # ★追加: 出題順序の設定
     order_type: str = "random"
 
 class MemorySetCreate(MemorySetBase):
@@ -26,8 +25,7 @@ class MemorySetResponse(MemorySetBase):
     owner_id: int
     
     class Config:
-        #orm_mode = True
-        from_attributes = True  # <-- これに変更
+        from_attributes = True
 
 # --- ユーザー ---
 class UserBase(BaseModel):
@@ -46,3 +44,14 @@ class UserResponse(UserBase):
 class Token(BaseModel):
     access_token: str
     token_type: str
+
+# ★追加: ランキング用スキーマ
+class RankEntry(BaseModel):
+    name: str
+    time: float
+    set_id: str
+    win_score: int
+    condition_type: str
+    
+    class Config:
+        from_attributes = True

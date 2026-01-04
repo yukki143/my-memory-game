@@ -11,7 +11,7 @@ export const BgmPlayer = () => {
     const audio = new Audio('/sounds/bgm_main.mp3');
     audio.loop = true;
     
-    // ★重要: インスタンス作成直後に、現在の設定音量を即座に反映
+    // インスタンス作成直後に、現在の設定音量を即座に反映
     audio.volume = settings.bgmVolume / 100;
     
     audioRef.current = audio;
@@ -22,26 +22,44 @@ export const BgmPlayer = () => {
       audioRef.current = null;
     };
     // 初回マウント時のみ実行
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!audioRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
 
-    // 2. 音量の連動 (0.0 - 1.0)
-    // 設定が変更されるたびにここが実行され、音量が滑らかに変わります
-    audioRef.current.volume = settings.bgmVolume / 100;
+    // 2. 音量の連動
+    audio.volume = settings.bgmVolume / 100;
 
-    // 3. ON/OFF切り替えの連動
+    // 3. 再生・停止の制御（自動再生ブロック対策を追加）
     if (settings.enableBgm) {
-      // play() は Promise を返すため、ブラウザの自動再生ブロックを考慮して catch を入れる
-      audioRef.current.play().catch(() => {
-        console.log("Autoplay blocked: ユーザーの操作（クリック等）を待機中");
-      });
+      const playPromise = audio.play();
+
+      if (playPromise !== undefined) {
+        playPromise.catch(() => {
+          console.log("Autoplay blocked: ユーザー操作を待機します");
+          
+          // ブロックされた場合、ユーザーが何かアクションを起こしたら再生を再試行する
+          const handleUserInteraction = () => {
+            audio.play().then(() => {
+              // 再生に成功したら、リスナーを削除して終了
+              document.removeEventListener('click', handleUserInteraction);
+              document.removeEventListener('keydown', handleUserInteraction);
+              document.removeEventListener('touchstart', handleUserInteraction);
+            }).catch(e => console.log("再試行失敗:", e));
+          };
+
+          // クリック、キー押し、タッチのいずれかで反応させる
+          document.addEventListener('click', handleUserInteraction, { once: true });
+          document.addEventListener('keydown', handleUserInteraction, { once: true });
+          document.addEventListener('touchstart', handleUserInteraction, { once: true });
+        });
+      }
     } else {
-      audioRef.current.pause();
+      audio.pause();
     }
   }, [settings.enableBgm, settings.bgmVolume]);
 
-  return null; // 画面には何も表示しない「機能のみ」のコンポーネント
+  return null;
 };

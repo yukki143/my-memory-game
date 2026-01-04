@@ -30,20 +30,18 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 # --- CORS設定 ---
-# 1. 完全一致するURLのリスト
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://braingarden.onrender.com",
 ]
 
-# 2. 正規表現パターンの文字列（リストではなく、1本の文字列にする）
 origin_regex = r"^http://(localhost|127\.0\.0\.1):517\d$"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,           # リストを渡す
-    allow_origin_regex=origin_regex,  # 文字列を渡す
+    allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -125,12 +123,7 @@ class VerifyPasswordRequest(BaseModel):
     roomId: str
     password: str
 
-class RankEntry(BaseModel):
-    name: str
-    time: float
-    set_id: str
-    win_score: int
-    condition_type: str
+# RankEntry は schemas.py に移動しました
 
 # メモリ内データ（ルーム管理用）
 active_rooms: Dict[str, RoomInfo] = {}
@@ -138,7 +131,7 @@ room_passwords: Dict[str, str] = {}
 room_owner_tokens: Dict[str, str] = {}
 room_clients: Dict[str, Set[str]] = {}
 
-RANKING_FILE = "ranking.json"
+# ★削除: RANKING_FILE 変数と load/save 関数は不要になりました
 
 DEFAULT_MEMORY_SETS = {
     "default": [
@@ -171,42 +164,34 @@ DEFAULT_MEMORY_SETS = {
     ],
 }
 
-def load_ranking():
-    if not os.path.exists(RANKING_FILE): return []
-    with open(RANKING_FILE, "r", encoding="utf-8") as f:
-        try: return json.load(f)
-        except: return []
-
-def save_ranking(data):
-    with open(RANKING_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
-
 # ==========================
 #  API エンドポイント
 # ==========================
 
-# @app.get("/")
-# def read_root():
-#     return {"message": "Hello, Brain Garden API!"}
-
 # ランキング関連
-@app.get("/api/ranking", response_model=List[RankEntry])
-def get_ranking(set_id: str, win_score: int, condition_type: str):
-    all_ranks = load_ranking()
-    filtered = [
-        r for r in all_ranks 
-        if r.get("set_id") == set_id and 
-           r.get("win_score") == win_score and 
-           r.get("condition_type") == condition_type
-    ]
-    filtered.sort(key=lambda x: x["time"])
-    return filtered[:10]
+# ★変更: DBから取得するように修正
+@app.get("/api/ranking", response_model=List[schemas.RankEntry])
+def get_ranking(set_id: str, win_score: int, condition_type: str, db: Session = Depends(get_db)):
+    results = db.query(models.Ranking).filter(
+        models.Ranking.set_id == set_id,
+        models.Ranking.win_score == win_score,
+        models.Ranking.condition_type == condition_type
+    ).order_by(models.Ranking.time.asc()).limit(10).all()
+    return results
 
+# ★変更: DBに保存するように修正
 @app.post("/api/ranking")
-def post_ranking(entry: RankEntry):
-    all_ranks = load_ranking()
-    all_ranks.append(entry.dict())
-    save_ranking(all_ranks)
+def post_ranking(entry: schemas.RankEntry, db: Session = Depends(get_db)):
+    new_rank = models.Ranking(
+        name=entry.name,
+        time=entry.time,
+        set_id=entry.set_id,
+        win_score=entry.win_score,
+        condition_type=entry.condition_type
+    )
+    db.add(new_rank)
+    db.commit()
+    db.refresh(new_rank)
     return {"message": "Ranking updated"}
 
 # 認証関連
@@ -437,23 +422,16 @@ def verify_room_password(req: VerifyPasswordRequest):
 # ==========================
 
 async def delayed_room_cleanup(room_id: str):
-    """
-    5秒待機してからルームを削除する。
-    再接続によってタスクがキャンセルされた場合は、manager.cleanup_tasks から自身を消して終了する。
-    """
     try:
         await asyncio.sleep(5)
-        # 5秒後、まだ誰もいなければ削除を実行
         if room_id in active_rooms and active_rooms[room_id].playerCount <= 0:
             print(f"Cleaning up empty room after grace period: {room_id}")
             for d in [active_rooms, room_passwords, room_owner_tokens, room_clients]:
                 d.pop(room_id, None)
             manager.active_connections.pop(room_id, None)
     except asyncio.CancelledError:
-        # 再接続時に manager.connect 側でキャンセルされた場合
         pass
     finally:
-        # 管理辞書から自分自身を確実に消去する（popなので二重消去エラーにならない）
         manager.cleanup_tasks.pop(room_id, None)
 
 # ==========================
@@ -462,49 +440,37 @@ async def delayed_room_cleanup(room_id: str):
 
 @app.websocket("/ws/{room_id}/{player_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str):
-    # 接続を確立
     await websocket.accept()
 
-    # ルームが存在するか確認
     if room_id not in active_rooms:
         await websocket.close(code=4000)
         return
 
-    # 接続管理マネージャーに登録（既存のクリーンアップタスクがあればここでキャンセルされる）
     await manager.connect(websocket, room_id)
     
-    # ルームのクライアントリストとカウントを更新
     if room_id not in room_clients: 
         room_clients[room_id] = set()
     room_clients[room_id].add(player_id)
     active_rooms[room_id].playerCount = len(room_clients[room_id])
 
     try:
-        # 2人揃ったら対戦準備完了通知
         if active_rooms[room_id].playerCount == 2:
             active_rooms[room_id].status = "playing"
             active_rooms[room_id].seed = str(uuid.uuid4())
             await manager.broadcast("MATCHED", room_id)
         
-        # 接続したプレイヤーの存在を周囲に通知（BattleMode.tsxの受信処理用）
-        # ※実際には playerName 送信はフロント側の wsSend で行われる
-        
         while True:
-            # クライアントからのメッセージ待機
             data = await websocket.receive_text()
             
-            # 再戦時などのステータス更新処理
             if data.endswith(":MATCHED"):
                 active_rooms[room_id].seed = str(uuid.uuid4())
                 active_rooms[room_id].status = "playing"
                 
-            # メッセージを部屋の全員にブロードキャスト
             await manager.broadcast(data, room_id)
             
     except (WebSocketDisconnect, Exception) as e:
         print(f"WS Disconnect or Error ({player_id}): {e}")
     finally:
-        # 切断時のクリーンアップ
         manager.disconnect(websocket, room_id)
         
         if room_id in room_clients:
@@ -514,23 +480,19 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                 count = len(room_clients[room_id])
                 active_rooms[room_id].playerCount = count
                 
-                # 1人になったら待ち状態に戻す
                 if count == 1:
                     active_rooms[room_id].status = "waiting"
                 
-                # 0人になったら削除予約タスクを開始
                 if count <= 0:
                     task = asyncio.create_task(delayed_room_cleanup(room_id))
                     manager.cleanup_tasks[room_id] = task
 
-# 2. フロントエンド配信設定をここに追加
+# フロントエンド配信
 frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
 
 if os.path.exists(frontend_path):
-    # 先に定義した API ルート以外のすべてのアクセスを React の dist フォルダに向けます
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
     
-    # ページをリロードした際に 404 になるのを防ぐ設定（React Router用）
     @app.exception_handler(404)
     async def not_found_exception_handler(request, exc):
         return FileResponse(os.path.join(frontend_path, "index.html"))
