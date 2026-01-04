@@ -524,7 +524,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
                     manager.cleanup_tasks[room_id] = task
 
 # 2. フロントエンド配信設定をここに追加
-frontend_path = os.path.join(os.getcwd(), "frontend/dist")
+frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
 
 if os.path.exists(frontend_path):
     # 先に定義した API ルート以外のすべてのアクセスを React の dist フォルダに向けます
