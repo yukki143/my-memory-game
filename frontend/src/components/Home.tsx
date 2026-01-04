@@ -330,7 +330,7 @@ function Home({ onGameStart }: HomeProps) {
         </div>
       )}
 
-      <footer className="absolute bottom-2 text-[#14532d] font-bold text-sm z-30 opacity-80">
+      <footer className="fixed bottom-2 text-[#14532d] font-bold text-sm z-30 opacity-80">
         © 2025 Brain Garden Project
 　　　  <br />
   　　　効果音提供　オトロジック（https://otologic.jp）
