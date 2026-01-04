@@ -7,6 +7,9 @@ from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 from dotenv import load_dotenv
+# ★追加: トークン生成に必要な時間ライブラリ
+from datetime import datetime, timedelta
+
 from . import database, models
 
 load_dotenv()
@@ -32,6 +35,14 @@ def verify_password(plain_password, hashed_password):
 
 def get_password_hash(password):
     return pwd_context.hash(password)
+
+# ★復元: 欠落していたトークン生成関数
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    # jwt.encode は jose ライブラリを使用
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # 現在のログインユーザー取得
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
