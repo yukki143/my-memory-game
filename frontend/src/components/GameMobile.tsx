@@ -1,164 +1,269 @@
-import { useState, useEffect, useRef } from 'react';
+// src/GameMobile.tsx
+import { useState, useEffect, useRef, useCallback } from 'react';
+import type { GameSettings, Problem } from '../types';
+import { useSound } from '../hooks/useSound';
 
-type Problem = {
-  text: string;
-  kana: string;
-};
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 type ApiResponse = {
   correct: Problem;
   options: Problem[];
 };
 
-// ★修正: onWrong の型定義を変更
 type Props = {
   onScore: () => void;
   onWrong: (problem: Problem) => void;
   resetKey: number;
   isSoloMode?: boolean;
+  roomId?: string;
+  playerId?: string;
+  setId?: string;
+  seed?: string;
+  settings?: GameSettings; 
+  wrongHistory?: string[];
+  totalAttempted?: number;
 };
 
-function GameMobile({ onScore, onWrong, resetKey, isSoloMode = false }: Props) {
-  // result状態をなくし、isWaiting(相手待ち)を追加
-  const [gameState, setGameState] = useState<'memorize' | 'quiz' | 'waiting'>('memorize');
-  const [currentProblem, setCurrentProblem] = useState<Problem | null>(null);
-  const [options, setOptions] = useState<Problem[]>([]);
-  
-  // 表示用: null=なし, true=〇, false=✕
-  const [overlayMark, setOverlayMark] = useState<boolean | null>(null);
+type SlotItem = { text: string; sourceId: number; } | null;
+type ChoiceItem = { id: number; text: string; isUsed: boolean; };
 
-  // ★修正1: 通信の競合を防ぐためのID管理
+
+// --- ここからコンポーネント ---
+function GameMobile({ 
+  onScore, onWrong, resetKey, isSoloMode = false, 
+  roomId, setId, playerId, // ★ Propsから受け取る
+  seed, settings, wrongHistory, totalAttempted 
+}: Props) {
+
+  const { playSE } = useSound();
+  const splitCount = settings?.questionsPerRound || 1;
+  const MEMORIZE_TIME = settings?.memorizeTime || 3;
+
+  // ★ WebSocketの接続処理はコンポーネントの「中」に移動
+  useEffect(() => {
+    // ソロモードの時は接続不要
+    if (isSoloMode || !roomId || !playerId) return;
+
+    const wsUrl = `${WS_BASE}/ws/battle/${roomId}/${playerId}?setName=${setId}`;
+    console.log("Connecting to:", wsUrl);
+    
+    const socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => console.log("WS Connected in GameMobile");
+    socket.onclose = () => console.log("WS Closed in GameMobile");
+
+    return () => {
+      socket.close();
+    };
+  }, [roomId, playerId, setId, isSoloMode]); // 依存配列に Props を指定
+
+  const [gameState, setGameState] = useState<'memorize' | 'quiz' | 'waiting'>('memorize');
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [slots, setSlots] = useState<SlotItem[]>([]);
+  const [choices, setChoices] = useState<ChoiceItem[]>([]);
+  const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
+  const [overlayMark, setOverlayMark] = useState<boolean | null>(null);
+  
   const latestRequestId = useRef(0);
 
-  const loadProblem = async () => {
-    // リクエストIDを更新（これで「このID以外は古い」と判断できる）
-    const requestId = latestRequestId.current + 1;
-    latestRequestId.current = requestId;
+  // ★追加: 最新の統計データを保持するRef
+  const totalAttemptedRef = useRef(totalAttempted);
+  const wrongHistoryRef = useRef(wrongHistory);
+  useEffect(() => { totalAttemptedRef.current = totalAttempted; }, [totalAttempted]);
+  useEffect(() => { wrongHistoryRef.current = wrongHistory; }, [wrongHistory]);
 
-    setOverlayMark(null);
-    setGameState('memorize');
-    
-    try {
-        const res = await fetch("http://127.0.0.1:8000/api/problem");
-        const data: ApiResponse = await res.json();
+  const loadProblem = useCallback(async () => {
+      const requestId = latestRequestId.current + 1;
+      latestRequestId.current = requestId;
 
-        // ★修正2: もし通信中に次のリクエストが始まっていたら、この結果は捨てる
-        if (requestId !== latestRequestId.current) return;
+      // 演出とステートのリセット
+      setGameState('waiting');
+      setOverlayMark(null);
+      setProblems([]);
+      setSlots(Array(splitCount).fill(null));
+      setChoices([]);
+      setSelectedChoiceId(null);
+      setTimeLeft(MEMORIZE_TIME);
 
-        setCurrentProblem(data.correct);
-        setOptions(data.options);
+      try {
+          const newProblems: Problem[] = [];
+          let accumulatedOptions: Problem[] = [];
 
-        // 暗記時間タイマー
-        setTimeout(() => {
-            // タイマー発火時も、まだこの問題が最新か確認する
-            if (requestId === latestRequestId.current) {
-                setGameState('quiz');
-            }
-        }, 1000);
+          for (let i = 0; i < splitCount; i++) {
+              const params = new URLSearchParams();
+              if (roomId) params.append("room_id", roomId);
+              if (setId) params.append("set_id", setId);
+              if (seed) params.append("seed", `${seed}-${i}`);
+              
+              // ★Refから最新値を取得
+              if (wrongHistoryRef.current && wrongHistoryRef.current.length > 0) {
+                  params.append("wrong_history", wrongHistoryRef.current.join(","));
+              }
+              if (totalAttemptedRef.current !== undefined) {
+                  params.append("current_index", String(totalAttemptedRef.current + i));
+              }
+              params.append("t", Date.now().toString()); 
 
-    } catch (e) {
-        console.error("Fetch error:", e);
-    }
-  };
+              const url = `${API_BASE}/api/problem?${params.toString()}`;
+              const res = await fetch(url, { cache: "no-store" });
+              const data: ApiResponse = await res.json();
+              
+              newProblems.push(data.correct);
+              accumulatedOptions = [...accumulatedOptions, ...data.options];
+          }
 
-  useEffect(() => { loadProblem(); }, []);
-  useEffect(() => { if (resetKey > 0) loadProblem(); }, [resetKey]);
+          if (requestId !== latestRequestId.current) return;
 
-  // ★文字数に応じてフォントサイズを決定（スマホ用調整）
-  const getFontSize = (text: string) => {
-    const len = text.length;
-    if (len <= 5) return "text-5xl"; // PCより少し小さく
-    if (len <= 10) return "text-4xl";
-    if (len <= 20) return "text-2xl";
-    if (len <= 30) return "text-xl";
-    return "text-sm"; 
-  };
+          setProblems(newProblems);
+          const correctWords = newProblems.map(p => p.text);
+          const dummyWords = accumulatedOptions
+              .map(p => p.text)
+              .filter(text => !correctWords.includes(text));
+          
+          const finalChoiceTexts = [...correctWords, ...dummyWords.slice(0, splitCount + 2)];
+          const shuffled = finalChoiceTexts
+              .sort(() => Math.random() - 0.5)
+              .map((text, idx) => ({ id: idx, text, isUsed: false }));
+          
+          setChoices(shuffled);
+          setTimeLeft(MEMORIZE_TIME);
+          setGameState('memorize');
 
-  // ★選択肢ボタン用のフォントサイズ
-  const getButtonFontSize = (text: string) => {
-    const len = text.length;
-    if (len <= 8) return "text-lg";
-    if (len <= 15) return "text-sm";
-    return "text-xs";
-  };
-
-  const handleAnswer = (selectedText: string) => {
-    if (!currentProblem) return;
-
-    if (selectedText === currentProblem.text) {
-      // ■ 正解！
-      setOverlayMark(true); // 〇を表示
-      onScore();            // スコア加算 & 親に通知
-      if (isSoloMode) {
-          setTimeout(() => loadProblem(), 400);
+      } catch (e) {
+          console.error("Fetch error:", e);
       }
-    } else {
-      // ■ 不正解...
-      setOverlayMark(false); // ✕を表示
-      onWrong(currentProblem);             // 親に「間違えた」と通知
-      if (isSoloMode) {
-          setTimeout(() => loadProblem(), 400);
+      // ★依存配列から統計データを削除
+  }, [roomId, setId, seed, MEMORIZE_TIME, splitCount]);
+
+  useEffect(() => { 
+    if (resetKey >= 0) loadProblem(); 
+  }, [resetKey, loadProblem]);
+
+  useEffect(() => {
+    if (gameState === 'memorize') {
+        if (timeLeft > 0) {
+            const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        } else {
+            setGameState('quiz');
+        }
+    }
+  }, [gameState, timeLeft]);
+
+  const handleSelectChoice = (choiceId: number) => {
+      const choice = choices.find(c => c.id === choiceId);
+      if (choice && choice.isUsed) return;
+      setSelectedChoiceId(selectedChoiceId === choiceId ? null : choiceId);
+  };
+
+  const handleTapSlot = (slotIndex: number) => {
+      if (selectedChoiceId !== null) {
+          const choice = choices.find(c => c.id === selectedChoiceId);
+          if (!choice) return;
+          const newSlots = [...slots];
+          const oldSlotItem = newSlots[slotIndex];
+          const newChoices = choices.map(c => {
+              if (c.id === selectedChoiceId) return { ...c, isUsed: true };
+              if (oldSlotItem && c.id === oldSlotItem.sourceId) return { ...c, isUsed: false };
+              return c;
+          });
+          newSlots[slotIndex] = { text: choice.text, sourceId: choice.id };
+          setSlots(newSlots);
+          setChoices(newChoices);
+          setSelectedChoiceId(null);
       } else {
-          // ★バトルモードの場合: 待機状態にする
-          setGameState('waiting');
+          const item = slots[slotIndex];
+          if (item) {
+              const newSlots = [...slots];
+              newSlots[slotIndex] = null;
+              const newChoices = choices.map(c => c.id === item.sourceId ? { ...c, isUsed: false } : c);
+              setSlots(newSlots);
+              setChoices(newChoices);
+          }
       }
-    }
   };
+
+  // ★ 決定ボタンを押した時の判定処理
+  const handleSubmit = () => {
+      if (slots.some(s => s === null) || gameState === 'waiting') return; 
+      setGameState('waiting');
+      
+      const isCorrect = slots.every((s, i) => s?.text === problems[i].text);
+      setOverlayMark(isCorrect);
+
+      if (isCorrect) {
+          // ★ 正解音
+          playSE('/sounds/se_correct.mp3');
+          onScore();
+      } else {
+          // ★ 不正解音
+          playSE('/sounds/se_wrong.mp3');
+          onWrong(problems[0]);
+      }
+  };
+
+  const isAllFilled = slots.length > 0 && slots.every(s => s !== null);
 
   return (
-    // relative をつけて、オーバーレイの基準点にする
-    <div className="relative p-4 bg-orange-50 h-full flex flex-col items-center justify-center w-full">
-      <h1 className="text-xl font-bold mb-4 text-orange-600">Memory Quiz</h1>
+    <div className="relative p-2 bg-orange-50 h-full flex flex-col items-center w-full overflow-hidden">
+      {gameState === 'memorize' && (
+        <div className="w-full h-2 bg-gray-300 rounded-full mb-2 shrink-0 overflow-hidden relative">
+          <style>{`@keyframes shrink-mobile { from { width: 100%; } to { width: 0%; } }`}</style>
+          <div 
+            key={resetKey}
+            className="h-full bg-orange-500" 
+            style={{ animation: `shrink-mobile ${MEMORIZE_TIME}s linear forwards` }}
+          />
+        </div>
+      )}
 
-      {/* ★ オーバーレイ表示 (〇 / ✕) : 問題の上に重なる */}
       {overlayMark !== null && (
           <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/10">
               <div className="text-9xl font-black drop-shadow-2xl animate-bounce-in">
-                  {overlayMark ? (
-                      <span className="text-green-500 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)]">〇</span>
-                  ) : (
-                      <span className="text-red-600 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)]">✕</span>
-                  )}
+                  {overlayMark ? <span className="text-green-500">〇</span> : <span className="text-red-600">✕</span>}
               </div>
           </div>
       )}
 
-      {/* 待機中のメッセージ */}
-      {gameState === 'waiting' && overlayMark === false && (
-          <div className="absolute bottom-10 z-40 bg-black/70 text-white px-6 py-2 rounded-full animate-pulse">
-              相手の回答を待っています...
-          </div>
-      )}
-
-      {/* 暗記画面 */}
-      {gameState === 'memorize' && currentProblem && (
-        <div className="flex-1 flex flex-col justify-center items-center animate-pulse">
-          <p className="text-gray-500 mb-2">覚えて！</p>
-          {/* ★修正: 文字サイズ動的変更 & 改行対応 */}
-          <div className={`font-black text-gray-800 break-words whitespace-normal text-center leading-tight ${getFontSize(currentProblem.text)}`}>
-            {currentProblem.text}
-          </div>
-          <p className="text-xl text-gray-400 mt-2">{currentProblem.kana}</p>
+      {gameState === 'memorize' && (
+        <div className="flex-1 flex flex-col justify-center items-center w-full gap-4 overflow-y-auto">
+          {problems.map((p, i) => (
+             <div key={i} className="bg-white p-4 rounded-xl shadow-md border-4 border-[#d7ccc8] w-full max-w-xs text-center">
+                <div className="text-3xl font-black text-[#5d4037] mb-1">{p.text}</div>
+             </div>
+          ))}
         </div>
       )}
 
-      {/* クイズ画面 */}
       {(gameState === 'quiz' || gameState === 'waiting') && (
-        <div className="w-full max-w-sm mt-4 grid grid-cols-2 gap-3 h-full max-h-[60%]">
-          {options.map((opt, index) => (
-            <button
-              key={index}
-              onClick={() => handleAnswer(opt.text)}
-              disabled={gameState === 'waiting'} // 待機中は押せない
-              className={`h-32 w-full
-                font-bold rounded-xl shadow-sm transition transform active:scale-95 flex items-center justify-center p-2 break-words leading-tight
-                ${gameState === 'waiting' ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-white border-2 border-orange-200 hover:bg-orange-100 active:bg-orange-300'}
-                ${getButtonFontSize(opt.text)} 
-              `}
-            >
-              {opt.text}
-            </button>
-          ))}
+        <div className="flex-1 flex flex-col w-full max-w-sm h-full overflow-hidden">
+            <div className="flex-1 w-full overflow-y-auto min-h-0 relative">
+                <div className="flex flex-col gap-2 justify-center items-center min-h-full py-4">
+                    {slots.map((slot, i) => (
+                        <button key={i} onClick={() => handleTapSlot(i)} disabled={gameState === 'waiting'} className={`relative w-full p-3 rounded-xl border-4 font-bold text-xl min-h-[60px] ${slot ? 'bg-white border-[#8d6e63]' : 'bg-black/5 border-dashed border-gray-400'}`}>
+                            {slot ? slot.text : <span className="text-sm opacity-50">配置</span>}
+                        </button>
+                    ))}
+                </div>
+            </div>
+            <div className="h-16 flex items-center justify-center shrink-0 my-2">
+                {isAllFilled && gameState !== 'waiting' && (
+                    <button onClick={handleSubmit} className="theme-leaf-btn px-8 py-3 rounded-full text-xl font-black shadow-lg">決定！</button>
+                )}
+            </div>
+            <div className="bg-[#d7ccc8]/30 p-3 rounded-t-2xl border-t-4 border-[#d7ccc8] h-[35%] shrink-0 flex flex-col">
+                <div className="flex-1 overflow-y-auto">
+                    <div className="flex flex-wrap gap-2 justify-center">
+                        {choices.map((choice) => (
+                            <button key={choice.id} onClick={() => handleSelectChoice(choice.id)} disabled={choice.isUsed || gameState === 'waiting'} className={`px-4 py-2 rounded-lg font-bold ${choice.isUsed ? 'bg-gray-200' : selectedChoiceId === choice.id ? 'bg-[#8d6e63] text-white' : 'bg-white'}`}>
+                                {choice.text}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
         </div>
       )}
     </div>

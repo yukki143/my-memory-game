@@ -80,3 +80,44 @@
   50% { opacity: 1; transform: scale(1.1); }
   100% { opacity: 0.3; transform: scale(0.8); }
 }
+
+/* 昼で固定：アニメーションなし */
+.atmosphere-day-static {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background-color: rgba(135, 206, 235, 0.2); /* 昼のパステルブルー */
+  pointer-events: none;
+}
+
+/* src/components/ForestPath.css の末尾に追加してください */
+
+/* ★ エフェクトOFF・夜OFFの時のクリーム色固定設定 */
+.atmosphere-cream-static {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* あなたのアプリのUI（wood-boxなど）と調和するクリーム色 */
+  background-color: rgba(255, 248, 225, 0.25); 
+  pointer-events: none;
+  /* アニメーション指定をあえて書かないことで停止させます */
+}
+
+/* 常時夜モード用の固定紫パステル */
+.atmosphere-night-static {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  /* 先ほど調整した光を抑えたパステルパープル */
+  background-color: rgba(107, 72, 189, 0.664); 
+  pointer-events: none;
+}
+
+/* 元々のアニメーションありのクラスはそのまま維持 */
+.atmosphere-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  animation: skyCycle 60s infinite linear;
+  pointer-events: none;
+}

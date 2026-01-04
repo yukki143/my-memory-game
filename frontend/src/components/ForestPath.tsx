@@ -1,6 +1,8 @@
+// src/components/ForestPath.tsx
 import { useMemo } from 'react';
 import './ForestPath.css';
 import bgImage from '../assets/bg-forest.png';
+import { useSettings } from '../context/SettingsContext'; // ★ インポートを忘れずに
 
 type ForestPathProps = {
   overlayOpacity?: number;
@@ -12,23 +14,31 @@ const PASTEL_COLORS = [
 ];
 
 export default function ForestPath({ }: ForestPathProps) {
-  // 星のデータを生成
+  // contextから設定を取得
+  const { settings } = useSettings();
+
+  /**
+   * 背景色の条件分岐 (ここが最重要ポイントです)
+   * 1. 常時夜モードON なら -> 固定の紫パステル
+   * 2. エフェクトON なら -> アニメーション(skyCycle)
+   * 3. それ以外(エフェクトOFF) なら -> 固定のクリーム色
+   */
+  const atmosphereClass = settings.isNightMode 
+    ? 'atmosphere-night-static'   // 常時夜モード
+    : settings.enableEffects 
+      ? 'atmosphere-overlay'      // アニメーションあり
+      : 'atmosphere-cream-static'; // ★ エフェクトOFF時のクリーム色固定
+
+  // 星を表示するかどうかの判定
+  // エフェクトがONの時だけ表示し、常時夜モードならアニメーションなしで表示
+  const showStars = settings.enableEffects;
+
+  // 星のデータ生成 (現在のロジックを維持)
   const stars = useMemo(() => {
-    // 星の数を200個に設定
     return Array.from({ length: 200 }).map((_, i) => {
-      
-      // ★修正ポイント: 「奥の白い部分」に合わせて出現位置を絞り込みます
-      // 画像の構図に合わせて数値を微調整しました
-      
-      // 縦の位置: 上から 0% 〜 100% の範囲（空が見えている高さを狙う）
       const top = Math.random() * 100; 
-      
-      // 横の位置: 左から 0% 〜 100% の範囲（画面中央に寄せる）
       const left = Math.random() * 100;
-      
-      // サイズ: 1px ~ 3px（奥にあるので小さくして遠近感を出す）
       const size = 1 + Math.random() * 3;
-      
       const color = PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
       const delay = Math.random() * 3;
 
@@ -40,7 +50,6 @@ export default function ForestPath({ }: ForestPathProps) {
           width: `${size}px`,
           height: `${size}px`,
           backgroundColor: color,
-          // 小さい星なので、光の広がり（boxShadow）も控えめに
           boxShadow: `0 0 ${size + 1}px ${color}`, 
           animationDelay: `${delay}s`,
         }
@@ -51,18 +60,21 @@ export default function ForestPath({ }: ForestPathProps) {
   return (
     <div className="forest-path-container">
         <img src={bgImage} alt="Forest Background" className="forest-bg-image" />
-        <div className="atmosphere-overlay"></div>
+        
+        {/* 背景色の層： atmosphereClass によってアニメーションの有無が切り替わります */}
+        <div className={atmosphereClass}></div>
 
-        {/* 星専用コンテナ（夜だけ出現） */}
-        <div className="stars-container">
-            {stars.map(star => (
-              <div 
-                key={star.id} 
-                className="twinkle-star" 
-                style={star.style} 
-              />
-            ))}
-        </div>
+        {/* 星の層 */}
+        {showStars && (
+          <div 
+            className="stars-container"
+            style={settings.isNightMode ? { opacity: 1, animation: 'none' } : {}}
+          >
+              {stars.map(star => (
+                <div key={star.id} className="twinkle-star" style={star.style} />
+              ))}
+          </div>
+        )}
 
         <div className="bottom-green-line"></div>
     </div>

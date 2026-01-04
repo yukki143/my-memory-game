@@ -1,136 +1,421 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ForestPath from './ForestPath'; // ★追加
+import ForestPath from './ForestPath';
+import { type RoomInfo } from '../types';
+import { authFetch } from '../utils/auth';
 
-function BattleLobby() {
-  const [roomId, setRoomId] = useState("room1");
-  const [playerName, setPlayerName] = useState("player1");
-  const [isConnected, setIsConnected] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [message, setMessage] = useState("");
+// APIの場所 (環境に合わせて変更してください)
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+
+type MemorySetOption = {
+  id: string;
+  name: string;
+};
+
+export default function BattleLobby() {
+  const navigate = useNavigate();
+  const [rooms, setRooms] = useState<RoomInfo[]>([]);
+  const [playerName, setPlayerName] = useState("Loading...");
+  const [showModal, setShowModal] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
-  const navigate = useNavigate(); // ホームに戻る用
-  const socketRef = useRef<WebSocket | null>(null);
+  // ルーム作成フォーム用
+  const [newRoomName, setNewRoomName] = useState("");
+  const [newRoomPass, setNewRoomPass] = useState("");
+  const [winCondition, setWinCondition] = useState(10);
+  const [conditionType, setConditionType] = useState<'score' | 'total'>('score');
+  
+  // メモリーセット選択用
+  const [memorySets, setMemorySets] = useState<MemorySetOption[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState("default");
 
-  const joinRoom = () => {
-    // 環境変数があればそれを使う、なければローカルホスト
-    // Viteの場合、import.meta.env.VITE_API_URL などを使うのが一般的ですが、ここではハードコード例を維持
-    const wsUrl = `ws://127.0.0.1:8000/ws/${roomId}/${playerName}`;
-    const ws = new WebSocket(wsUrl);
+  const [myOwnedRooms, setMyOwnedRooms] = useState<string[]>([]);
+
+  // 初回ロード時にルーム一覧とセット一覧を取得
+  useEffect(() => {
+    fetchRooms();
+    fetchMemorySets();
+    loadOwnedRooms();
+    fetchMyProfile();
     
-    ws.onopen = () => {
-      setIsConnected(true);
-      setLogs(prev => [...prev, "🔵 サーバーに接続しました"]);
-    };
+    // 3秒ごとにポーリング（自動更新）
+    const interval = setInterval(fetchRooms, 3000); 
+    return () => clearInterval(interval);
+  }, []);
 
-    ws.onmessage = (event) => {
-      setLogs(prev => [...prev, event.data]);
-    };
-
-    ws.onclose = () => {
-      setIsConnected(false);
-      setLogs(prev => [...prev, "🔴 切断されました"]);
-    };
-
-    socketRef.current = ws;
-  };
-
-  const sendMessage = () => {
-    if (socketRef.current && message) {
-      socketRef.current.send(message);
-      setMessage("");
+  const fetchMyProfile = async () => {
+    try {
+      const res = await authFetch("/api/users/me");
+      if (res.ok) {
+        const data = await res.json();
+        setPlayerName(data.username);
+      } else {
+        setPlayerName("Guest");
+      }
+    } catch (e) {
+      console.error("Profile fetch error", e);
+      setPlayerName("Guest");
     }
   };
 
-  return (
-    // ★修正: 背景色クラス(bg-purple-50)を削除し、ForestPathを配置
-    <div className="min-h-screen relative flex items-center justify-center overflow-hidden">
+  const loadOwnedRooms = () => {
+    const keys = Object.keys(localStorage);
+    const owned = keys
+        .filter(key => key.startsWith("room_token_"))
+        .map(key => key.replace("room_token_", ""));
+    setMyOwnedRooms(owned);
+  };
+
+  const fetchRooms = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/rooms`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setRooms(data);
+        } else {
+          setRooms([]);
+        }
+      }
+    } catch (e) {
+      console.error("Room fetch error:", e);
+    }
+  };
+
+  const fetchMemorySets = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/sets`);
+      if (res.ok) {
+        const data = await res.json();
+        setMemorySets(data);
+      }
+    } catch (e) {
+      console.error("Sets fetch error:", e);
+    }
+  };
+
+  // ★修正: ルーム削除処理 (空の部屋ならトークンなしでも削除可能にする)
+  const handleDeleteRoom = async (roomId: string, isGhost: boolean) => {
+    const confirmMsg = isGhost 
+      ? `誰もいないルーム「${roomId}」を掃除しますか？`
+      : `ルーム「${roomId}」を削除してもよろしいですか？`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    // トークンを取得 (持っていれば送る)
+    const token = localStorage.getItem(`room_token_${roomId}`);
+
+    try {
+      const url = token 
+        ? `${API_BASE}/api/rooms/${roomId}?token=${token}`
+        : `${API_BASE}/api/rooms/${roomId}`;
+
+      const res = await fetch(url, { method: "DELETE" });
+
+      if (res.ok) {
+        alert(isGhost ? "掃除しました 🧹" : "ルームを削除しました");
+        localStorage.removeItem(`room_token_${roomId}`);
+        loadOwnedRooms();
+        fetchRooms();
+      } else {
+        const err = await res.json();
+        alert("削除できませんでした: " + (err.detail || "権限がありません"));
+      }
+    } catch (e) {
+      alert("通信エラーが発生しました");
+    }
+  };
+
+  const handleCreateRoom = async () => {
+    if (!newRoomName.trim()) return alert("ルーム名を入力してください");
+
+    setIsLoading(true);
+
+    const requestBody = {
+      name: newRoomName,
+      hostName: playerName,
+      password: newRoomPass,
+      winScore: winCondition,
+      memorySetId: selectedSetId,
+      conditionType: conditionType
+    };
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/rooms`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        setIsLoading(false);
+        alert("作成エラー: " + (err.detail || "通信エラーです"));
+        return;
+      }
+
+      const data = await res.json();
       
-      {/* ★背景コンポーネント (ロビーなので 'walk' モード) */}
-      <ForestPath overlayOpacity={0.4} />
+      if (data.ownerToken) {
+          localStorage.setItem(`room_token_${newRoomName}`, data.ownerToken);
+          loadOwnedRooms();
+      }
 
-      {/* メインコンテンツ (z-indexで手前に表示) */}
-      <div className="z-10 w-full max-w-2xl px-4">
+      const roomInfo = data.room;
+
+      navigate('/battle', { 
+        state: { 
+          roomId: newRoomName, 
+          playerName, 
+          playerId: generatePlayerId(playerName),
+          isHost: true,
+          settings: { 
+             memorizeTime: roomInfo.memorizeTime,
+             questionsPerRound: roomInfo.questionsPerRound,
+             clearConditionValue: winCondition,
+             conditionType: roomInfo.conditionType
+          },
+          memorySetId: selectedSetId
+        } 
+      });
+
+    } catch (e) {
+      setIsLoading(false);
+      alert("サーバーに接続できませんでした。");
+    }
+  };
+
+  const joinGame = async (room: RoomInfo) => {
+    if (room.isLocked) {
+      const pass = prompt("パスワードを入力してください");
+      if (pass === null) return;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/rooms/verify`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roomId: room.id, password: pass })
+        });
+        if (!res.ok) {
+            alert("パスワードが違います");
+            return;
+        }
+      } catch(e) {
+          alert("認証エラー");
+          return;
+      }
+    }
+
+    const settings = {
+        memorizeTime: room.memorizeTime,
+        questionsPerRound: room.questionsPerRound,
+        clearConditionValue: room.winScore,
+        conditionType: room.conditionType
+    };
+
+    navigate('/battle', {
+      state: { 
+          roomId: room.id, 
+          playerName, 
+          playerId: generatePlayerId(playerName),
+          isHost: false,
+          settings: settings,
+          memorySetId: room.memorySetId
+      }
+    });
+  };
+
+  const generatePlayerId = (name: string) => {
+    return name + "_" + Math.random().toString(36).substr(2, 9);
+  };
+
+  return (
+    <div className="min-h-screen relative flex flex-col items-center overflow-hidden font-hakoniwa text-[#5d4037]">
+      <div className="fixed inset-0 pointer-events-none"><ForestPath overlayOpacity={0.2} /></div>
+
+      <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 backdrop-blur-md shadow-md border-b-4 border-[#8d6e63]">
+        <button onClick={() => navigate('/')} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
+          ← ホームに戻る
+        </button>
+        <h1 className="text-lg md:text-2xl font-black whitespace-nowrap text-center mx-2">
+          バトルロビー
+        </h1>
+        <div className="w-10 md:w-20"></div>
+      </header>
+
+      <div className="flex-1 w-full max-w-4xl p-6 z-10 flex flex-col gap-6">
         
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl md:text-5xl font-black text-green-800 drop-shadow-sm mb-2 font-hakoniwa">
-            対戦ロビー
-          </h1>
-          <p className="text-green-700 font-bold bg-white/60 inline-block px-4 py-1 rounded-full backdrop-blur-sm">
-            森の奥へ進み、対戦相手を探しています...
-          </p>
-        </header>
+        <div className="bg-white/90 p-4 rounded-2xl shadow-md border-l-8 border-[#8d6e63] flex items-center justify-between">
+            <div className="flex items-center gap-2">
+                <span className="font-bold">ログイン中:</span>
+                <span className="text-xl font-black text-[#5d4037]">{playerName}</span>
+            </div>
+        </div>
 
-        {!isConnected ? (
-          <div className="bg-white/70 backdrop-blur-md p-8 rounded-3xl shadow-xl border-4 border-green-100 max-w-md mx-auto transform transition-all hover:scale-105">
-            <div className="mb-6">
-              <label className="block text-green-800 font-black mb-2 text-lg">ルームID</label>
-              <input 
-                className="border-2 border-green-200 p-3 w-full rounded-xl focus:outline-none focus:border-green-500 font-bold text-gray-700 bg-green-50" 
-                value={roomId} onChange={(e) => setRoomId(e.target.value)} 
-                placeholder="例: room1"
-              />
-            </div>
-            <div className="mb-8">
-              <label className="block text-green-800 font-black mb-2 text-lg">あなたの名前</label>
-              <input 
-                className="border-2 border-green-200 p-3 w-full rounded-xl focus:outline-none focus:border-green-500 font-bold text-gray-700 bg-green-50" 
-                value={playerName} onChange={(e) => setPlayerName(e.target.value)} 
-                placeholder="例: 勇者"
-              />
-            </div>
-            <div className="space-y-3">
-              <button 
-                onClick={joinRoom}
-                className="w-full bg-gradient-to-br from-green-500 to-green-600 text-white font-black py-4 rounded-xl shadow-lg hover:shadow-green-500/30 hover:translate-y-[-2px] transition-all active:scale-95 text-lg"
-              >
-                🌲 入室して進む
-              </button>
-              <button 
-                onClick={() => navigate('/')}
-                className="w-full bg-white text-green-600 font-bold py-3 rounded-xl border-2 border-green-100 hover:bg-green-50 transition-colors"
-              >
-                戻る
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-white/70 backdrop-blur-md p-6 rounded-3xl shadow-xl border-4 border-green-100 w-full animate-fade-in-up">
-            <div className="flex justify-between items-center mb-4 border-b border-green-100 pb-2">
-              <span className="font-bold text-green-800">Room: {roomId}</span>
-              <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded font-mono">Connected</span>
-            </div>
-            
-            <div className="h-64 overflow-y-auto bg-green-50/50 p-4 mb-4 rounded-xl border border-green-100 font-mono text-sm shadow-inner">
-              {logs.length === 0 && (
-                <div className="text-center text-gray-400 mt-20">ログはまだありません</div>
-              )}
-              {logs.map((log, i) => (
-                <div key={i} className="mb-2 p-2 bg-white rounded shadow-sm border-l-4 border-green-400 animate-slide-in-right">
-                  {log}
-                </div>
-              ))}
+        <button 
+            onClick={() => setShowModal(true)}
+            className="w-full py-4 theme-flower-btn rounded-2xl font-black text-xl shadow-lg transform transition hover:scale-105"
+        >
+            ＋ 新しいルームを作る
+        </button>
+
+        <div>
+            <div className="flex justify-between items-end mb-2 px-2">
+                <h2 className="text-xl font-bold text-white drop-shadow-md">現在のルーム一覧</h2>
+                <button 
+                    onClick={fetchRooms} 
+                    className="text-sm bg-white/80 px-3 py-1 rounded-full font-bold hover:bg-white transition flex items-center gap-1"
+                >
+                    🔄 更新
+                </button>
             </div>
 
-            <div className="flex gap-2">
-              <input 
-                className="border-2 border-green-200 p-3 flex-grow rounded-xl focus:outline-none focus:border-green-500 shadow-sm"
-                value={message} onChange={(e) => setMessage(e.target.value)}
-                placeholder="メッセージを入力..."
-                onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-              />
-              <button 
-                onClick={sendMessage}
-                className="bg-green-500 text-white px-6 rounded-xl font-bold hover:bg-green-600 shadow-md transition-colors active:scale-95"
-              >
-                送信
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-[200px]">
+                {rooms.length === 0 ? (
+                    <div className="col-span-2 text-center py-10 bg-white/60 rounded-xl border-4 border-dashed border-[#d7ccc8] flex flex-col items-center justify-center">
+                        <p className="font-bold text-gray-500 mb-2">現在ルームはありません</p>
+                        <p className="text-sm text-gray-400">新しいルームを作って対戦者を待ちましょう！</p>
+                    </div>
+                ) : (
+                    rooms.map(room => (
+                        <div key={room.id} className="bg-white/95 p-5 rounded-2xl shadow-md border-2 border-[#d7ccc8] relative overflow-hidden group hover:border-[#8d6e63] transition">
+                            <div className="absolute top-0 left-0 w-2 h-full bg-[#8d6e63]"></div>
+                            <div className="pl-4">
+                                <div className="flex justify-between items-start">
+                                    <h3 className="text-xl font-black mb-1 flex items-center gap-2 truncate">
+                                        {room.name}
+                                        {room.isLocked && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded">🔑</span>}
+                                    </h3>
+                                    
+                                    {/* ★修正: 所有しているルーム、または参加人数が0人のルームに削除ボタンを表示 */}
+                                    {(myOwnedRooms.includes(room.id) || room.playerCount === 0) && (
+                                        <button 
+                                            onClick={() => handleDeleteRoom(room.id, room.playerCount === 0)}
+                                            className="text-xs bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded font-bold hover:bg-red-200"
+                                        >
+                                            {room.playerCount === 0 ? "掃除 🧹" : "削除 🗑️"}
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                    <span className="text-xs bg-[#fff8e1] text-[#5d4037] px-2 py-1 rounded border border-[#d7ccc8]">
+                                        🏆 {room.winScore}
+                                        {room.conditionType === 'total' ? '問プレイ' : '本先取'}
+                                    </span>
+                                    <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-100">
+                                        👥 {room.playerCount} / 2
+                                    </span>
+                                </div>
+                                
+                                {room.status === 'playing' || room.playerCount >= 2 ? (
+                                    <button disabled className="w-full py-2 bg-gray-300 text-gray-500 font-bold rounded-lg cursor-not-allowed">
+                                        対戦中 / 満員
+                                    </button>
+                                ) : (
+                                    <button 
+                                        onClick={() => joinGame(room)}
+                                        className="w-full py-2 theme-leaf-btn font-bold rounded-lg shadow-sm transform group-hover:scale-105 transition"
+                                    >
+                                        参加する
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))
+                )}
             </div>
-          </div>
-        )}
+        </div>
       </div>
+
+      {/* モーダル (変更なし) */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
+            <div className="theme-white-wood-card p-6 w-full max-w-md animate-pop-in relative">
+                <h2 className="text-2xl font-black mb-6 text-center text-[#5d4037] border-b-4 border-[#d7ccc8] pb-2">
+                    ルーム作成
+                </h2>
+                
+                <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                    <div>
+                        <label className="block font-bold mb-1 text-sm">ルーム名 <span className="text-red-500">*</span></label>
+                        <input className="w-full p-3 border-2 border-[#d7ccc8] rounded-lg font-bold focus:outline-none focus:border-[#8d6e63]"
+                            value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="例: 初心者歓迎！" />
+                    </div>
+                    <div>
+                        <label className="block font-bold mb-1 text-sm">パスワード (任意)</label>
+                        <input className="w-full p-3 border-2 border-[#d7ccc8] rounded-lg font-bold focus:outline-none focus:border-[#8d6e63]"
+                            type="password" value={newRoomPass} onChange={e => setNewRoomPass(e.target.value)} placeholder="空欄なら誰でも参加OK" />
+                    </div>
+                    
+                    <div>
+                        <label className="block font-bold mb-1 text-sm">使用するメモリーセット</label>
+                        <select 
+                            className="w-full p-3 border-2 border-[#d7ccc8] rounded-lg font-bold bg-white focus:outline-none focus:border-[#8d6e63]"
+                            value={selectedSetId}
+                            onChange={e => setSelectedSetId(e.target.value)}
+                        >
+                            {memorySets.map(set => (
+                                <option key={set.id} value={set.id}>
+                                    {set.name}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block font-bold mb-1 text-sm">終了条件</label>
+                        <div className="flex flex-col gap-3">
+                            <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden w-full">
+                                <button 
+                                    onClick={() => setConditionType('score')}
+                                    className={`flex-1 py-2 font-bold transition text-sm ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
+                                >
+                                    正解数
+                                </button>
+                                <div className="w-[2px] bg-[#d7ccc8]"></div>
+                                <button 
+                                    onClick={() => setConditionType('total')}
+                                    className={`flex-1 py-2 font-bold transition text-sm ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
+                                >
+                                    出題数
+                                </button>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <input 
+                                    type="number" min="1" max="50"
+                                    className="flex-1 p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center bg-white"
+                                    value={winCondition}
+                                    onChange={e => setWinCondition(Number(e.target.value))}
+                                />
+                                <span className="text-sm font-bold whitespace-nowrap">
+                                    {conditionType === 'score' ? '問正解' : '問プレイ'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="flex gap-3 mt-8 pt-4 border-t-2 border-[#d7ccc8]">
+                    <button 
+                        onClick={() => setShowModal(false)} 
+                        className="flex-1 py-3 bg-gray-200 font-bold rounded-xl text-gray-600 hover:bg-gray-300 transition"
+                    >
+                        キャンセル
+                    </button>
+                    <button 
+                        onClick={handleCreateRoom} 
+                        disabled={isLoading}
+                        className="flex-1 py-3 theme-leaf-btn font-bold rounded-xl shadow-md transform active:scale-95 transition flex justify-center items-center"
+                    >
+                        {isLoading ? "作成中..." : "作成して入室"}
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
     </div>
   );
 }
-
-export default BattleLobby;

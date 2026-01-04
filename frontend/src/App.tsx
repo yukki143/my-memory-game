@@ -1,47 +1,56 @@
-import { useState, useEffect } from 'react';
-import BattleMode from './components/BattleMode';
-import Home from './components/Home'; // ★さっき作ったHomeを読み込む
+import { useEffect } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
+import Home from './components/Home';
 import SoloMode from './components/SoloMode';
-import './App.css';
+import BattleLobby from './components/BattleLobby';
+import BattleMode from './components/BattleMode';
+import Login from './components/Login';           
+import Register from './components/Register';     
+import CreateMemorySet from './components/CreateMemorySet'; 
+import MemorySetList from './components/MemorySetList';
+import { BgmPlayer } from './components/BgmPlayer.tsx';
+import { type GameSettings } from './types';
 
-// 画面の種類を型定義（タイプミス防止）
-type Screen = 'home' | 'battle' | 'solo';
+const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 function App() {
-  // ★重要: 今どの画面を表示しているか管理する変数
-  // 'home' ならホーム画面、'battle' なら対戦画面を表示します
-  const [screen, setScreen] = useState<Screen>('home');
-  
-  // サーバーとの通信確認用（デバッグ用として残しておいてOK）
-  const [serverMessage, setServerMessage] = useState("Checking...");
+  const navigate = useNavigate();
 
   useEffect(() => {
-    // サーバーが生きてるか確認（挨拶）
-    fetch("http://127.0.0.1:8000/")
-      .then((res) => res.json())
-      .then((data) => setServerMessage(data.message))
-      .catch(() => setServerMessage("Offline"));
+    fetch(`${API_BASE}/`)
+      .catch(() => console.log("Server might be offline"));
   }, []);
+
+  const handleGameStart = (mode: 'online' | 'solo', settings?: GameSettings) => {
+    if (mode === 'solo') {
+      navigate('/solo', { state: { settings } });
+    } else {
+      navigate('/lobby');
+    }
+  };
 
   return (
     <>
-      {/* ■ ホーム画面 */}
-      {screen === 'home' && (
-        <Home 
-          onGameStart={(mode) => setScreen(mode === 'online' ? 'battle' : 'solo')} // 「ボタンが押されたらbattleに切り替えて！」と伝える
-        />
-      )}
+      {/* BgmPlayer は Routes の外に配置。
+         URLが変化しても音楽が途切れることなく再生され続けます。
+      */}
+      <BgmPlayer />
 
-      {/* ■ 対戦画面 */}
-      {screen === 'battle' && (
-        <BattleMode />
-      )}
+      <Routes>
+        <Route path="/" element={<Home onGameStart={handleGameStart} />} />
+        <Route path="/solo" element={<SoloMode onBack={() => navigate('/')} />} />
+        
+        {/* アカウント・作成関連 */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/memory-sets" element={<MemorySetList />} />
+        <Route path="/create-set" element={<CreateMemorySet />} />
+        <Route path="/edit-set/:id" element={<CreateMemorySet />} />
 
-      {/* ■ 個人戦画面 */}
-      {screen === 'solo' && (
-        // onBackでホームに戻れるようにする
-        <SoloMode onBack={() => setScreen('home')} />
-      )}
+        {/* バトル関連 */}
+        <Route path="/lobby" element={<BattleLobby />} />
+        <Route path="/battle" element={<BattleMode />} />
+      </Routes>
     </>
   );
 }

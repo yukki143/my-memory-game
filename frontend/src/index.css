@@ -149,10 +149,9 @@
 }
 
 /* UI: 白い木の板（メインカード） */
-/* .theme-white-wood-card {
+.theme-white-wood-card {
     @apply bg-[#fffbeb]/60 border-4 border-[#d4a373] rounded-3xl shadow-xl;
-    background-image: repeating-linear-gradient(0deg, transparent, transparent 29px, #faebd7 30px);
-} */
+}
 
 
 /* --- 3. アニメーション設定 --- */
@@ -406,4 +405,41 @@
     color: #5D4037;
     --grid-color: rgba(0, 0, 0, 0.15); /* 線: 薄い黒に戻す */
   }
+}
+
+.theme-garden-animate {
+  /* 60秒かけて背景色をループさせる */
+  animation: day-cycle 60s infinite linear;
+  background-size: 100% 100%, 40px 40px, 40px 40px; /* グリッド線のサイズ維持 */
+}
+
+/* --- 修正: 落ち着いた紫のパステル夜モード --- */
+.theme-garden-cute-night {
+  /* ベースは深みのあるパステルパープル（緑色と非常に相性が良い色です） */
+  background-color: #3c3744; 
+  
+  /* 中心部の光を抑え、ぼんやりとしたラベンダーの輝きに変更 */
+  background-image: 
+    radial-gradient(#b28febda 85%),
+    linear-gradient(#ffffff0d 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff0d 1px, transparent 1px);
+    
+  background-size: 100% 100%, 40px 40px, 40px 40px;
+  background-position: center top, center bottom, center bottom;
+  
+  /* 文字色は少し青みのある白（ミントホワイト）で、読みやすさを確保 */
+  color: #396275e7; 
+  transition: all 1s ease;
+}
+
+/* 夜モードの時、積み木（UI）の質感も少し幻想的にします */
+.theme-garden-cute-night .theme-wood-box {
+  background-color: #d1d5db; /* 少し冷たいパステルトーン */
+  border-color: #94a3b8;
+  color: #1e293b;
+}
+
+/* ロゴの縁取りも夜に合わせて調整 */
+.theme-garden-cute-night .text-stroke-garden {
+  -webkit-text-stroke: 4px #4b5563;
 }

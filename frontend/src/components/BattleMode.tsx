@@ -1,57 +1,88 @@
+// src/BattleMode.tsx
 import { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import GamePC from './GamePC';
 import GameMobile from './GameMobile';
 import ForestPath from './ForestPath';
+import { DEFAULT_SETTINGS } from '../types';
+import { useSound } from '../hooks/useSound';
 
-// 問題の型定義
 type Problem = {
   text: string;
   kana: string;
 };
 
-// ★ モバイル用スコアカードコンポーネント（内部定義）
 type MobileScoreBoardProps = {
   myScore: number;
   opponentScore: number;
   winningScore: number;
+  myName: string;
+  opponentName: string;
 };
 
+const MobileScoreBoard = ({ myScore, opponentScore, winningScore, myName, opponentName }: MobileScoreBoardProps) => (
+  <div className="absolute top-3 right-3 z-50 w-[60vw] max-w-[260px] theme-wood-box p-2 flex justify-between items-center shadow-xl bg-[#d7ccc8] border-2 border-[#8d6e63]">
+    <div className="flex flex-col w-[45%]">
+      <div className="flex justify-between items-end mb-1">
+        <span className="text-xs font-bold font-hakoniwa truncate max-w-[70%]">{myName}</span>
+        <span className="text-xl font-black font-pop leading-none text-green-700">{myScore}</span>
+      </div>
+      <div className="w-full bg-gray-300 rounded-full h-2 overflow-hidden border border-gray-500">
+        <div className="bg-green-500 h-full transition-all duration-300" style={{ width: `${Math.min((myScore / winningScore) * 100, 100)}%` }}></div>
+      </div>
+    </div>
+    <div className="font-black text-amber-900 opacity-50 text-sm px-2">VS</div>
+    <div className="flex flex-col w-[45%]">
+       <div className="flex justify-between items-end mb-1">
+        <span className="text-xl font-black font-pop leading-none text-red-700">{opponentScore}</span>
+        <span className="text-xs font-bold font-hakoniwa truncate max-w-[70%] text-right">{opponentName}</span>
+      </div>
+      <div className="w-full bg-gray-300 rounded-full h-2 overflow-hidden border border-gray-500">
+        <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${Math.min((opponentScore / winningScore) * 100, 100)}%` }}></div>
+      </div>
+    </div>
+  </div>
+);
+
 function BattleMode() {
-  const [roomId, setRoomId] = useState("room1");
-  const [playerName, setPlayerName] = useState("Player" + Math.floor(Math.random() * 100));
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const { 
+      roomId = "room1", 
+      playerName = "Guest",
+      playerId = `Guest_${Math.random()}`, 
+      isHost = false,
+      settings = DEFAULT_SETTINGS,
+      memorySetId
+  } = location.state || {};
+
+  const WINNING_SCORE = settings.clearConditionValue || 10;
+  const CONDITION_TYPE = settings.conditionType || 'score';
+  const { playSE } = useSound();
+
   const [isConnected, setIsConnected] = useState(false);
   const [gameStatus, setGameStatus] = useState<'waiting' | 'countdown' | 'playing' | 'finished'>('waiting');
   const [countdownValue, setCountdownValue] = useState(3);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
   const [myScore, setMyScore] = useState(0);
   const [opponentScore, setOpponentScore] = useState(0);
-
-  // ゲームを強制的に次の問題に進めるためのトリガー
-  const [resetKey, setResetKey] = useState(0);
-
-  // 不正解フラグ
+  const [roundNumber, setRoundNumber] = useState(0);
   const [iMissed, setIMissed] = useState(false);
   const [opponentMissed, setOpponentMissed] = useState(false);
-
-  // 時間管理（クリアタイム計算用）
   const [startTime, setStartTime] = useState(0);
-  const [clearTime, setClearTime] = useState(0); // エラー解消のため定義
-
-  // リトライ管理フラグ
+  const [clearTime, setClearTime] = useState(0); 
   const [isRetryReady, setIsRetryReady] = useState(false);
   const [opponentRetryReady, setOpponentRetryReady] = useState(false);
-
-  // --- 詳細リザルト用データ ---
   const [myTypoCount, setMyTypoCount] = useState(0);     
   const [myMissWordCount, setMyMissWordCount] = useState(0); 
   const [winStreak, setWinStreak] = useState(0); 
-  
-  // ★追加: 詳細分析用のState
   const [missedKeyStats, setMissedKeyStats] = useState<{ [key: string]: number }>({});
   const [missedProblems, setMissedProblems] = useState<Problem[]>([]);
+  const [opponentName, setOpponentName] = useState("Rival");
 
-  const WINNING_SCORE = 10;
   const socketRef = useRef<WebSocket | null>(null);
+  const isConnecting = useRef(false);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -59,92 +90,123 @@ function BattleMode() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-// ■ 1. サーバー接続 & カウントダウン開始トリガー
+  useEffect(() => {
+    if (socketRef.current || isConnecting.current) return;
+    isConnecting.current = true;
+    joinRoom();
+
+    return () => {
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+      isConnecting.current = false;
+    };
+  }, []);
+
   const joinRoom = () => {
-
-    setMyScore(0);
-    setOpponentScore(0);
-    setIMissed(false);
-    setOpponentMissed(false);
-
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${roomId}/${playerName}`);
+    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${roomId}/${playerId}`);
+    socketRef.current = ws;
     
     ws.onopen = () => {
       setIsConnected(true);
-      // 接続したら即座にカウントダウン状態へ移行
-      setGameStatus('countdown');
-      setCountdownValue(3);
+      setGameStatus('waiting');
     };
 
     ws.onmessage = (event) => {
       const msg = event.data as string;
-      if (msg.startsWith(playerName)) return; 
-
-      if (msg.includes("SCORE_UP")) {
-         // ★修正: Stateの更新関数内で判定ロジックを入れる
-         setOpponentScore(prev => {
-             const newOpponentScore = prev + 1;
-             
-             // 相手が勝った場合
-             if (newOpponentScore >= WINNING_SCORE) {
-                 setGameStatus('finished');
-                 setClearTime((Date.now() - startTime) / 1000);
-                 setWinStreak(0); // 負けたら連勝リセット
-             } else {
-                 forceNextRound();
-             }
-             return newOpponentScore;
-         });
-         
-      } else if (msg.includes("MISS")) {
-         setOpponentMissed(true);
-      } else if (msg.includes("RETRY")) {
-         setOpponentRetryReady(true);
+      let senderId = "";
+      let command = "";
+      
+      if (msg.includes(":")) {
+          const parts = msg.split(":");
+          senderId = parts[0];
+          command = parts.slice(1).join(":");
+      } else {
+          command = msg;
       }
+
+      // 自分自身の送信したメッセージは、基本的にはここで処理しない（送信時に自明なため）
+      if (senderId === playerId && command !== "MATCHED") return;
+
+      if (command === "MATCHED") {
+          prepareNextGame();
+          startCountdown();
+          wsSend("NAME:" + playerName);
+      } 
+      else if (command.startsWith("NAME:")) {
+          setOpponentName(command.substring(5));
+      }
+      else if (command === "SCORE_UP") {
+          setOpponentScore(prev => prev + 1);
+      } 
+      else if (command === "MISS") {
+          setOpponentMissed(true);
+      } 
+      else if (command === "RETRY") {
+          setOpponentRetryReady(true);
+      }
+    };
+
+    ws.onclose = (event) => {
+        setIsConnected(false);
+        if (event.code === 4001) {
+            alert("満員です");
+            navigate('/lobby');
+        } else if (event.code === 4000) {
+            alert("ルームが見つかりません");
+            navigate('/lobby');
+        }
     };
   };
 
-  // タイムアウト監視
+  const startCountdown = () => {
+      setGameStatus('countdown');
+      setCountdownValue(3);
+  };
+
+  const wsSend = (cmd: string) => {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(`${playerId}:${cmd}`);
+      }
+  };
+
+  // 放置防止用（どちらかがミスしたまま止まらないように）
   useEffect(() => {
-    // 「自分がミスして相手待ち」または「相手がミスして自分待ち」の状態かどうか
     const isOneSideWaiting = (iMissed && !opponentMissed) || (!iMissed && opponentMissed);
-
-    if (!isOneSideWaiting) return; // 待機状態でなければ何もしない
-
-    // 5秒後に強制的に次の問題へ
+    if (!isOneSideWaiting || gameStatus !== 'playing') return;
     const timer = setTimeout(() => {
-        console.log("Time over! Force next round.");
-        forceNextRound();
+        goNextRound();
     }, 5000);
-
-    // クリーンアップ関数
     return () => clearTimeout(timer);
-  }, [iMissed, opponentMissed]);
+  }, [iMissed, opponentMissed, gameStatus]);
 
+  // 両者ミス時の同期
   useEffect(() => {
-    if (opponentMissed && iMissed) {
-        // 両者不正解！ -> 次へ
-        forceNextRound();
+    if (opponentMissed && iMissed && gameStatus === 'playing') {
+        setTimeout(goNextRound, 500); 
     }
-  }, [opponentMissed, iMissed]);
+  }, [opponentMissed, iMissed, gameStatus]);
 
+  // ★修正: 再戦の準備が整ったかチェック
   useEffect(() => {
-    if (isRetryReady && opponentRetryReady) {
-        restartGame();
+    if (isRetryReady && opponentRetryReady && isHost) {
+        // ホストが MATCHED を送信して全員の画面を切り替える
+        wsSend("MATCHED");
     }
-  }, [isRetryReady, opponentRetryReady]);
+  }, [isRetryReady, opponentRetryReady, isHost]);
 
-  // カウントダウンロジック (setIntervalに変更して安定化)
   useEffect(() => {
     if (gameStatus === 'countdown') {
         const interval = setInterval(() => {
             setCountdownValue(prev => {
                 if (prev <= 1) {
                     clearInterval(interval);
-                    // 0になるタイミングでゲーム開始
                     setGameStatus('playing');
                     setStartTime(Date.now());
-                    setResetKey(k => k + 1);
+                    setRoundNumber(1);
+                    setIMissed(false);
+                    setOpponentMissed(false);
                     return 0;
                 }
                 return prev - 1;
@@ -154,99 +216,103 @@ function BattleMode() {
     }
   }, [gameStatus]);
 
-  // 終了判定（Stateの同期用）
-  // useEffect(() => {
-  //   if (isFinished && gameStatus !== 'finished') {
-  //       setGameStatus('finished');
-  //       setClearTime((Date.now() - startTime) / 1000);
 
-  //       if (myScore >= WINNING_SCORE) {
-  //           setWinStreak(prev => prev + 1);
-  //       } else {
-  //           setWinStreak(0);
-  //       }
-  //   }
-  // }, [myScore, opponentScore, gameStatus, startTime, isFinished]);
+  const checkBattleFinish = (isWin: boolean) => {
+    if (isWin) {
+      playSE('/sounds/se_win.mp3');
+    } else {
+      playSE('/sounds/se_lose.mp3');
+    }
+  };
+
+  // 相手のスコア監視による終了判定
+  useEffect(() => {
+    if (opponentScore === 0 || gameStatus !== 'playing') return;
+    
+    setTimeout(() => {
+        if (CONDITION_TYPE === 'score' && opponentScore >= WINNING_SCORE) {
+            checkBattleFinish(false);
+            setGameStatus('finished');
+            setClearTime((Date.now() - startTime) / 1000);
+            setWinStreak(0);
+        } else {
+            goNextRound();
+        }
+    }, 500);
+  }, [opponentScore]);
   
-  const restartGame = () => {
+  // ★修正: 再戦のためにすべての統計情報をクリアする関数
+  const prepareNextGame = () => {
     setMyScore(0);
     setOpponentScore(0);
     setIMissed(false);
     setOpponentMissed(false);
     setIsRetryReady(false);
     setOpponentRetryReady(false);
-    
-    // 統計リセット（連勝数は維持！）
     setMyTypoCount(0);
     setMyMissWordCount(0);
     setMissedKeyStats({});
     setMissedProblems([]);
     setClearTime(0);
-
-    setGameStatus('countdown');
-    setCountdownValue(3);
+    setRoundNumber(0);
   };
 
-  // ■ リトライボタンを押した時の処理
   const handleRetry = () => {
+    if (isRetryReady) return;
     setIsRetryReady(true);
-    // サーバーに「自分はリトライしたい」と伝える
-    if (socketRef.current) socketRef.current.send("RETRY");
+    wsSend("RETRY");
   };
 
-  // ■ 次のラウンドへ強制移行 (リセット処理)
-  const forceNextRound = () => {
-    // 演出のため少し待つ
-    setTimeout(() => {
-        setResetKey(prev => prev + 1);
-        // ★重要: フラグをリセット
-        setIMissed(false);
-        setOpponentMissed(false);
-    }, 200); 
-  };
-
-  // ■ 正解送信
-  const addScore = () => {
+  const goNextRound = () => {
     if (gameStatus !== 'playing') return;
-    
-    // 現在のスコアではなく、加算後のスコアで判定するために変数に入れる
-    const newScore = myScore + 1;
-    setMyScore(newScore);
 
-    if (socketRef.current) socketRef.current.send("SCORE_UP");
-
-    // ★修正: ここで即座に終了判定を行う
-    if (newScore >= WINNING_SCORE) {
+    if (CONDITION_TYPE === 'total' && roundNumber >= WINNING_SCORE) {
+        const isWin = myScore > opponentScore;
+        checkBattleFinish(isWin);
         setGameStatus('finished');
         setClearTime((Date.now() - startTime) / 1000);
-        
-        // 勝った場合は連勝数を増やす
-        setWinStreak(prev => prev + 1);
-        
-        // ★重要: ゲーム終了なら forceNextRound (次の問題へ) は実行しない
-        return; 
+        if (isWin) setWinStreak(prev => prev + 1);
+        else setWinStreak(0);
+        return;
     }
-    
-    forceNextRound(); // ゲーム続行時のみ実行
+    setRoundNumber(prev => prev + 1);
+    setIMissed(false);
+    setOpponentMissed(false);
   };
 
-  // 問題データを受け取って記録する
+  const addScore = () => {
+    if (gameStatus !== 'playing') return;
+    const newScore = myScore + 1;
+    setMyScore(newScore);
+    wsSend("SCORE_UP");
+
+    setTimeout(() => {
+        if (gameStatus !== 'playing') return;
+
+        if (CONDITION_TYPE === 'score' && newScore >= WINNING_SCORE) {
+            checkBattleFinish(true);
+            setGameStatus('finished');
+            setClearTime((Date.now() - startTime) / 1000);
+            setWinStreak(prev => prev + 1);
+        } else {
+            goNextRound();
+        }
+    }, 500);
+  };
+
   const sendMiss = (problem?: Problem) => {
     if (gameStatus !== 'playing') return;
     setIMissed(true);
     setMyMissWordCount(prev => prev + 1);
-    
-    // ミス問題リストに追加
     if (problem) {
         setMissedProblems(prev => [...prev, problem]);
     }
-
-    if (socketRef.current) socketRef.current.send("MISS");
-    if (opponentMissed) forceNextRound();
+    wsSend("MISS");
   };
 
   const handleTypo = (expectedChar: string) => {
       if (gameStatus === 'playing') {
+          playSE('/sounds/se_typo.mp3');
           setMyTypoCount(prev => prev + 1);
           setMissedKeyStats(prev => {
               const char = expectedChar.toUpperCase();
@@ -255,15 +321,16 @@ function BattleMode() {
       }
   };
 
-  // ★ランク計算ロジック
-  const getTypingRank = (count: number) => {
-      if (count === 0) return 'S';
-      if (count <= 3) return 'A';
-      if (count <= 8) return 'B';
-      if (count <= 12) return 'C';
-      if (count <= 15) return 'D';
-      return 'E';
+  const getTypingRank = (count: number, myScore: number) => {
+    if (myScore === 0 && count === 0) return '-';
+    if (count === 0) return 'S';
+    if (count <= 3) return 'A';
+    if (count <= 8) return 'B';
+    if (count <= 12) return 'C';
+    if (count <= 15) return 'D';
+    return 'E';
   };
+
 
   const getMemoryRank = (score: number, miss: number) => {
       const total = score + miss;
@@ -278,278 +345,231 @@ function BattleMode() {
   };
 
   const getSortedMissedKeys = () => {
-      return Object.entries(missedKeyStats)
-          .sort(([, a], [, b]) => b - a)
-          .slice(0, 5);
+      return Object.entries(missedKeyStats).sort(([, a], [, b]) => b - a).slice(0, 5);
   };
 
   const showHUD = gameStatus === 'countdown' || gameStatus === 'playing';
-  const isResultScrollable = isMobile && gameStatus === 'finished';
-
-const MobileScoreBoard = ({ myScore, opponentScore, winningScore }: MobileScoreBoardProps) => (
-  <div className="absolute top-3 right-3 z-50 w-[60vw] max-w-[260px] theme-wood-box p-2 flex justify-between items-center shadow-xl bg-[#d7ccc8] border-2 border-[#8d6e63]">
-    {/* YOU (Left) */}
-    <div className="flex flex-col w-[45%]">
-      <div className="flex justify-between items-end mb-1">
-        <span className="text-xs font-bold font-hakoniwa truncate max-w-[70%]">YOU</span>
-        <span className="text-xl font-black font-pop leading-none text-green-700">{myScore}</span>
-      </div>
-      <div className="w-full bg-gray-300 rounded-full h-2 overflow-hidden border border-gray-500">
-        <div className="bg-green-500 h-full transition-all duration-300" style={{ width: `${Math.min((myScore / winningScore) * 100, 100)}%` }}></div>
-      </div>
-    </div>
-
-    {/* VS Separator */}
-    <div className="font-black text-amber-900 opacity-50 text-sm px-2">VS</div>
-
-    {/* RIVAL (Right) */}
-    <div className="flex flex-col w-[45%]">
-       <div className="flex justify-between items-end mb-1">
-        <span className="text-xl font-black font-pop leading-none text-red-700">{opponentScore}</span>
-        <span className="text-xs font-bold font-hakoniwa truncate max-w-[70%] text-right">RIVAL</span>
-      </div>
-      <div className="w-full bg-gray-300 rounded-full h-2 overflow-hidden border border-gray-500">
-        <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${Math.min((opponentScore / winningScore) * 100, 100)}%` }}></div>
-      </div>
-    </div>
-  </div>
-);
 
   return (
-    <div className={`relative w-screen flex flex-col items-center justify-center p-4 
-        ${isResultScrollable ? 'min-h-screen overflow-y-auto' : 'h-screen overflow-hidden'}`}>
+    <div className={`relative w-screen flex flex-col items-center justify-center p-4 overflow-x-hidden
+        ${isMobile && gameStatus === 'finished' ? 'min-h-screen overflow-y-auto' : 'h-screen overflow-hidden'}`}>
       
-      {/* 背景色レイヤー */}
-      <div className="absolute inset-0 bg-green-100 -z-20" />
-      
-      {/* 背景アニメーション */}
-      <ForestPath overlayOpacity={0.2} />
+      <div className="fixed inset-0 bg-green-100 -z-20" />
+      <div className="fixed inset-0 -z-10">
+         <ForestPath overlayOpacity={0.2} />
+      </div>
 
-      {/* 戻るボタン */}
-      <button 
-        onClick={() => window.location.href = '/'} 
-        className="absolute top-4 left-4 z-50 theme-wood-btn px-6 py-3 flex items-center gap-2 font-bold text-sm md:text-base font-pop"
-      >
-        <span>←</span>
-        <span>もどる</span>
+      <button onClick={() => navigate('/')} className="fixed top-4 left-4 z-[100] theme-wood-btn px-6 py-3 flex items-center gap-2 font-bold text-sm md:text-base cursor-pointer hover:scale-105 active:scale-95 transition-transform">
+        <span>←</span> <span>もどる</span>
       </button>
 
-      {/* モバイル用スコア */}
       {isMobile && showHUD && (
         <MobileScoreBoard 
           myScore={myScore} 
           opponentScore={opponentScore} 
-          winningScore={WINNING_SCORE} 
+          winningScore={WINNING_SCORE}
+          myName={playerName}
+          opponentName={opponentName}
         />
       )}
 
-      <div className="relative z-10 w-full h-full flex flex-col items-center justify-center">
+      {iMissed && !opponentMissed && gameStatus === 'playing' && (
+          <div className="fixed inset-0 z-[60] bg-black/50 flex flex-col items-center justify-center animate-fade-in">
+              <div className="text-4xl md:text-6xl font-black text-white drop-shadow-lg mb-2">WRONG!</div>
+              <div className="text-xl font-bold text-white animate-pulse">相手の回答を待っています...</div>
+          </div>
+      )}
+
+      <div className={`relative z-10 w-full flex flex-col items-center justify-center ${isMobile && gameStatus === 'finished' ? 'my-10' : 'h-full'}`}>
 
         {!isConnected ? (
-            /* --- 待機・接続画面 --- */
-            <>
-                <h1 className="text-4xl md:text-6xl mb-8 text-center text-battle-logo font-hakoniwa animate-fade-in-down" data-text="BATTLE STAGE">
-                    BATTLE STAGE
-                </h1>
-                <div className="theme-wood-box p-8 w-full max-w-md shadow-2xl animate-fade-in-up">
-                    <h2 className="text-2xl font-bold mb-6 text-center font-hakoniwa text-[#5d4037]">バトルに参加する</h2>
-                    <input 
-                        className="text-black border-4 border-[#8d6e63] p-4 mb-4 w-full rounded-xl bg-[#fff8e1] font-bold focus:outline-none focus:border-[#5d4037]"
-                        value={roomId} onChange={(e) => setRoomId(e.target.value)} placeholder="ルームID"
-                    />
-                    <input 
-                        className="text-black border-4 border-[#8d6e63] p-4 mb-6 w-full rounded-xl bg-[#fff8e1] font-bold focus:outline-none focus:border-[#5d4037]"
-                        value={playerName} onChange={(e) => setPlayerName(e.target.value)} placeholder="プレイヤー名"
-                    />
-                    <button onClick={joinRoom} className="w-full theme-leaf-btn py-4 rounded-xl font-black text-2xl shadow-lg font-pop transform transition hover:scale-105">
-                        JOIN BATTLE
-                    </button>
-                </div>
-            </>
+            <div className="text-4xl md:text-6xl font-black text-white drop-shadow-lg animate-pulse tracking-wider">CONNECTING...</div>
         ) : (
-            /* --- 接続後エリア --- */
             <div className="w-full h-full flex flex-col items-center justify-center">
                 
-                {/* ★修正ポイント: 「ゲーム中画面」と「結果画面」を完全に分けることでタグの閉じ忘れを防ぐ*/}
+                {gameStatus === 'waiting' && (
+                    <div className="text-center animate-pulse">
+                        <h2 className="text-4xl md:text-6xl font-black text-white drop-shadow-lg mb-4">WAITING FOR<br/>CHALLENGER...</h2>
+                        <div className="text-xl font-bold text-[#fff8e1] bg-[#5d4037] px-6 py-2 rounded-full inline-block">Room: {roomId}</div>
+                    </div>
+                )}
 
-                {gameStatus === 'countdown' || gameStatus === 'playing' ? (
-                    /* --- 1. ゲーム中レイアウト (3カラム: YOU | GAME | RIVAL) --- */
+                {gameStatus === 'countdown' && (
+                    <div className="flex flex-col items-center justify-center">
+                        <div className="text-2xl md:text-4xl font-bold text-white drop-shadow-md font-hakoniwa mb-4 animate-bounce">MATCHED!</div>
+                        <div className="text-5xl md:text-5xl font-black text-[#ffca28] scale-150 pt-2 animate-pop-in">{countdownValue > 0 ? countdownValue : "START!"}</div>
+                    </div>
+                )}
+
+                {gameStatus === 'playing' && (
                     <div className="w-full h-full flex flex-row justify-center items-center gap-4 md:gap-12 pb-4">
-                        
-                        {/* 左サイド (YOU) */}
-                        {!isMobile && showHUD && (
-                            <div className="w-64 theme-leaf-box p-6 text-center shrink-0 shadow-xl border-4 border-green-800 bg-green-100 animate-slide-in-left">
+                        {!isMobile && (
+                            <div className="w-64 theme-leaf-box p-6 text-center shrink-0 shadow-xl border-4 border-green-800 bg-green-100">
                                 <div className="text-xl font-bold mb-2 font-hakoniwa text-green-900">YOU</div>
-                                <div className="text-3xl font-black mb-4 truncate font-pop text-green-800">{playerName}</div>
-                                <div className="text-7xl font-black mb-4 font-pop text-green-600 drop-shadow-sm">{myScore}</div>
+                                <div className="text-3xl font-black mb-4 truncate text-green-800">{playerName}</div>
+                                <div className="text-7xl font-black mb-4 text-green-600 drop-shadow-sm">{myScore}</div>
                                 <div className="w-full bg-green-900/20 rounded-full h-5 overflow-hidden border-2 border-green-700/50">
                                     <div className="bg-green-500 h-full transition-all duration-300" style={{ width: `${(myScore / WINNING_SCORE) * 100}%` }}></div>
                                 </div>
                             </div>
                         )}
 
-                        {/* 中央ゲームエリア */}
                         <div className="flex flex-col items-center justify-center shrink-0">
-                            {gameStatus === 'countdown' && (
-                                <div className="flex flex-col items-center justify-center">
-                                    <div className="text-2xl md:text-3xl font-bold text-white drop-shadow-md font-hakoniwa mb-4">MATCHED!</div>
-                                    <div className="text-5xl md:text-5xl font-black text-[#ffca28] drop-shadow-[0_5px_5px_rgba(0,0,0,0.5)] font-pop scale-150 mt-2">
-                                        {countdownValue > 0 ? countdownValue : "START!"}
-                                    </div>
-                                </div>
-                            )}
-
-                            {gameStatus === 'playing' && (
-                                <div className={`bg-white/90 rounded-3xl overflow-hidden shadow-2xl border-8 border-[#d4a373] animate-pop-in
-                                    ${isMobile ? 'w-[90vw] aspect-[3/4] mt-10' : 'w-[95vw] max-w-5xl h-[70vh] min-h-[500px]'}`}>
-                                    {isMobile ? (
-                                        <GameMobile onScore={addScore} onWrong={sendMiss} resetKey={resetKey} /> 
-                                    ) : (
-                                        <GamePC onScore={addScore} onWrong={sendMiss} onTypo={handleTypo} resetKey={resetKey} />
-                                    )}
-                                </div>
-                            )}
+                            <div className={`
+                                overflow-hidden animate-pop-in relative
+                                ${isMobile ? 'w-[90vw] h-[70vh] min-h-[550px] mt-4 bg-[#fff8e1] rounded-3xl border-4 border-[#d4a373] shadow-xl flex flex-col' 
+                                           : 'bg-white/90 rounded-3xl shadow-2xl border-8 border-[#d4a373] w-[95vw] max-w-5xl h-[70vh] min-h-[500px]'}
+                            `}>
+                                {isMobile ? (
+                                    <GameMobile 
+                                      onScore={addScore} 
+                                      onWrong={sendMiss} 
+                                      resetKey={roundNumber}
+                                      roomId={roomId}
+                                      playerId={playerName}
+                                      setId={memorySetId}
+                                      seed={`${roomId}-${roundNumber}`} 
+                                      settings={settings}
+                                      wrongHistory={missedProblems.map(p => p.text)}
+                                      totalAttempted={myScore + myMissWordCount}
+                                    /> 
+                                ) : (
+                                    <GamePC 
+                                        onScore={addScore} 
+                                        onWrong={sendMiss} 
+                                        onTypo={handleTypo} 
+                                        resetKey={roundNumber}
+                                        roomId={roomId}
+                                        playerId={playerName}
+                                        setId={memorySetId}
+                                        settings={settings}
+                                        seed={`${roomId}-${roundNumber}`}
+                                        wrongHistory={missedProblems.map(p => p.text)}
+                                        totalAttempted={myScore + myMissWordCount}
+                                    />
+                                )}
+                            </div>
                         </div>
 
-                        {/* 右サイド (RIVAL) */}
-                        {!isMobile && showHUD && (
-                            <div className="w-64 theme-wood-box p-6 text-center shrink-0 shadow-xl border-4 border-[#8d6e63] bg-[#fff8e1] animate-slide-in-right">
+                        {!isMobile && (
+                            <div className="w-64 theme-wood-box p-6 text-center shrink-0 shadow-xl border-4 border-[#8d6e63] bg-[#fff8e1]">
                                 <div className="text-xl font-bold mb-2 font-hakoniwa text-[#5d4037]">RIVAL</div>
-                                <div className="text-3xl font-black mb-4 drop-shadow font-pop text-[#3e2723]">OPPONENT</div>
-                                <div className="text-7xl font-black mb-4 drop-shadow-md font-pop text-[#bf360c]">{opponentScore}</div>
+                                <div className="text-3xl font-black mb-4 truncate text-[#3e2723]">{opponentName}</div>
+                                <div className="text-7xl font-black mb-4 text-[#bf360c]">{opponentScore}</div>
                                 <div className="w-full bg-amber-900/20 rounded-full h-5 overflow-hidden border-2 border-amber-900/50">
                                     <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${(opponentScore / WINNING_SCORE) * 100}%` }}></div>
                                 </div>
                             </div>
                         )}
                     </div>
+                )}
 
-                ) : (
-                    /* --- 2. 結果画面レイアウト (2カラム: 結果 | 分析) --- */
+                {gameStatus === 'finished' && (
                     <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 
                         ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[85vh]'}`}>
                         
-                        {/* 左カード: 勝敗 & 連勝記録 */}
                         <div className="flex-1 h-full min-w-0">
                             <div className="theme-wood-box p-6 h-full flex flex-col items-center shadow-2xl animate-fade-in-up">
-                                {myScore >= WINNING_SCORE ? (
+                                {myScore > opponentScore ? (
                                     <>
-                                        <div className="text-5xl md:text-7xl font-black text-yellow-500 drop-shadow-md mb-2 pt-12 font-pop animate-bounce">YOU WIN!</div>
+                                        <div className="text-5xl md:text-7xl font-black text-yellow-500 drop-shadow-md mb-2 pt-12 animate-bounce">YOU WIN!</div>
                                         <p className="text-3xl font-bold font-hakoniwa text-[#5d4037]">おめでとう！</p>
+                                    </>
+                                ) : myScore < opponentScore ? (
+                                    <>
+                                        <div className="text-5xl md:text-7xl font-black text-blue-500 drop-shadow-md mb-2 pt-12">YOU LOSE...</div>
+                                        <p className="text-3xl font-bold font-hakoniwa text-[#5d4037]">ドンマイ！</p>
                                     </>
                                 ) : (
                                     <>
-                                        <div className="text-5xl md:text-7xl font-black text-blue-500 drop-shadow-md mb-2 pt-12 font-pop">YOU LOSE...</div>
-                                        <p className="text-3xl font-bold font-hakoniwa text-[#5d4037]">ドンマイ！</p>
+                                    <div className="text-5xl md:text-7xl font-black text-green-500 drop-shadow-md mb-2 pt-12">DRAW</div>
+                                    <p className="text-3xl font-bold font-hakoniwa text-[#5d4037]">いい勝負だったね！</p>
                                     </>
                                 )}
 
-                                {/* 連勝表示 */}
-                                <div className="mt-8 bg-[#fff8e1] border-4 border-[#d4a373] rounded-2xl p-6 w-full max-w-xs text-center shadow-inner transform rotate-1">
-                                    <div className="text-3xl font-bold text-[#8d6e63] font-hakoniwa mb-2">連続勝利数</div>
-                                    <div className="text-3xl font-bold text-[#8d6e63] font-hakoniwa mb-2">👑</div>
-                                    <div className="text-6xl font-black font-pop text-[#d97706] drop-shadow-sm flex items-center justify-center gap-0">
-                                        <span className="text-3xl"></span>{winStreak}
+                                <div className="mt-8 bg-[#fff8e1] border-4 border-[#d4a373] rounded-2xl p-6 w-full max-w-xs text-center shadow-inner">
+                                    <div className="text-3xl font-bold text-[#8d6e63] font-hakoniwa mb-2">連続勝利数 👑</div>
+                                    <div className="text-6xl font-black text-[#d97706] drop-shadow-sm flex items-center justify-center gap-0">
+                                        {winStreak}
                                     </div>
                                 </div>
 
-                                {/* スコア対比 */}
-                                <div className="mt-8 flex justify-center items-center gap-8 w-full font-pop">
+                                <div className="mt-4 flex justify-center items-center gap-8 w-full">
                                     <div className="text-center">
-                                        <div className="text-4xs font-bold text-green-800">YOU</div>
-                                        <div className="text-8xl font-black text-green-600">{myScore}</div>
+                                        <div className="text-xs font-bold text-green-800">YOU</div>
+                                        <div className="text-6xl font-black text-green-600">{myScore}</div>
                                     </div>
-                                    <div className="text-2xl font-black text-[#5d4037] opacity-50">-</div>
+                                    <div className="text-xl font-black text-[#5d4037] opacity-50">-</div>
                                     <div className="text-center">
-                                        <div className="text-4xs font-bold text-red-800">RIVAL</div>
-                                        <div className="text-8xl font-black text-red-600">{opponentScore}</div>
+                                        <div className="text-xs font-bold text-red-800">RIVAL</div>
+                                        <div className="text-6xl font-black text-red-600">{opponentScore}</div>
                                     </div>
                                 </div>
 
-                                <div className="mt-auto mb-24 w-full flex justify-center">
+                                <div className="mt-6 mb-6 w-full flex justify-center">
                                     {isRetryReady ? (
-                                        <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">
-                                            相手の承認を待っています...
-                                        </div>
+                                        <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手の承認を待っています...</div>
                                     ) : (
-                                        <button onClick={handleRetry} className="theme-leaf-btn py-3 rounded-xl font-black text-xl font-pop shadow-lg transform transition hover:scale-105 w-full max-w-xs">
-                                            再戦
+                                        <button onClick={handleRetry} className="theme-leaf-btn py-3 rounded-xl font-black text-xl shadow-lg transform transition hover:scale-105 w-full max-w-xs">
+                                            再戦する！
                                         </button>
                                     )}
                                 </div>
                             </div>
                         </div>
 
-                        {/* 右カード: 詳細分析 */}
-                        <div className="flex-1 h-full min-w-0">
-                          <div className="theme-wood-box p-6 flex-1 h-full flex flex-col shadow-2xl animate-fade-in-up delay-100 overflow-hidden">
-                              <h3 className="text-xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] flex items-center gap-2 font-hakoniwa shrink-0">
-                                  バトル分析
-                              </h3>
-                              
-                              <div className="flex-1 overflow-y-auto pr-2 space-y-6">
-                                  {/* ランクスコア */}
+                        <div className="flex-1 relative w-full md:w-auto min-h-[300px] md:min-h-0">
+                          <div className="md:absolute md:inset-0 theme-wood-box p-5 flex flex-col shadow-2xl animate-fade-in-up delay-100 overflow-hidden h-full">
+                              <h3 className="text-xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] font-hakoniwa">バトル分析</h3>
+                              <div className="flex-1 overflow-y-auto pr-2 space-y-4">
                                   <div className="bg-[#fff8e1] p-4 rounded-xl border-4 border-[#d4a373] shadow-inner">
                                       <h4 className="text-sm font-bold text-[#5d4037] mb-3 text-center border-b border-[#d4a373] pb-1 mx-4">プレイ評価</h4>
-
                                       <div className="flex justify-around items-center">
                                           <div className="text-center">
                                               <div className="text-sm font-bold text-[#8d6e63] mb-1">暗記力</div>
-                                              <div className="text-5xl font-black font-pop text-[#d97706] drop-shadow-sm">{getMemoryRank(WINNING_SCORE, missedProblems.length)}</div>
+                                              <div className="text-5xl font-black text-[#d97706] drop-shadow-sm">{getMemoryRank(myScore, missedProblems.length)}</div>
                                           </div>
                                           {!isMobile && (
-                                              <>
-                                                  <div className="w-px h-12 bg-[#d4a373]"></div>
-                                                  <div className="text-center">
-                                                      <div className="text-sm font-bold text-[#8d6e63] mb-1">タイピング</div>
-                                                      <div className="text-5xl font-black font-pop text-[#d97706] drop-shadow-sm">{getTypingRank(myTypoCount)}</div>
-                                                  </div>
-                                              </>
+                                            <>
+                                                <div className="w-px h-12 bg-[#d4a373]"></div>
+                                                <div className="text-center">
+                                                    <div className="text-sm font-bold text-[#8d6e63] mb-1">タイピング</div>
+                                                    <div className="text-5xl font-black text-[#d97706] drop-shadow-sm">{getTypingRank(myTypoCount, myScore)}</div>
+                                                </div>
+                                            </>
                                           )}
                                       </div>
                                   </div>
 
-                                  {/* ミスキー (PCのみ) */}
                                   {!isMobile && (
-                                      <div className="bg-white/80 p-4 rounded-xl border-2 border-red-200 shadow-sm">
-                                          <div className="text-sm font-bold text-red-800 mb-2 flex items-center gap-2">
-                                              <span>⌨️ 苦手なキー</span>
-                                              <span className="text-xs font-normal bg-red-100 px-2 py-0.5 rounded text-red-600">Total: {myTypoCount}</span>
-                                          </div>
-                                          <div className="flex gap-2 flex-wrap">
-                                              {getSortedMissedKeys().length === 0 ? (
-                                                  <span className="text-sm text-gray-400 w-full text-center py-2">ミスなし！Perfect!</span>
-                                              ) : (
-                                                  getSortedMissedKeys().map(([key, count]) => (
-                                                      <div key={key} className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-lg font-bold border border-red-200 flex items-center gap-2 shadow-sm">
-                                                          <span className="font-mono text-2xl">{key}</span>
-                                                          <span className="text-sm opacity-60">x{count}</span>
-                                                      </div>
-                                                  ))
-                                              )}
-                                          </div>
+                                    <div className="bg-white/80 p-4 rounded-xl border-2 border-red-200 shadow-sm">
+                                      <div className="text-sm font-bold text-red-800 mb-2">⌨️ 苦手なキー</div>
+                                      <div className="flex gap-2 flex-wrap">
+                                        {getSortedMissedKeys().length === 0 ? (
+                                          <span className="text-xs text-gray-400">ミスなし！</span>
+                                        ) : (
+                                          getSortedMissedKeys().map(([key, count]) => (
+                                            <div key={key} className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-lg font-bold border border-red-200">
+                                              <span className="font-mono">{key}</span>
+                                              <span className="text-sm opacity-60"> x{count}</span>
+                                            </div>
+                                          ))
+                                        )}
                                       </div>
+                                    </div>
                                   )}
 
-                                  {/* ミス問題リスト */}
                                   <div className="bg-white/80 p-4 rounded-xl border-2 border-blue-200 shadow-sm min-h-[150px]">
-                                      <div className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2">
-                                          <span>❌ ミスした問題</span>
-                                          <span className="text-xs font-normal bg-blue-100 px-2 py-0.5 rounded text-blue-600">Total: {missedProblems.length}</span>
-                                      </div>
+                                      <div className="text-sm font-bold text-blue-800 mb-2">❌ ミスした問題 (Total: {missedProblems.length})</div>
                                       <div className="bg-white rounded border border-blue-100 max-h-[200px] overflow-y-auto">
-                                          {missedProblems.length === 0 ? (
-                                              <div className="text-center text-gray-400 text-sm py-8">全問正解！すごい！</div>
-                                          ) : (
-                                              <ul className="divide-y divide-blue-50">
-                                                  {missedProblems.map((p, i) => (
-                                                      <li key={i} className="p-2 flex justify-between items-center hover:bg-blue-50/50 transition">
-                                                          <span className="font-bold text-red-600 mr-2">{p.text}</span>
-                                                          <span className="text-gray-500 text-xs">{p.kana}</span>
-                                                      </li>
-                                                  ))}
-                                              </ul>
-                                          )}
+                                          <ul className="divide-y divide-blue-50">
+                                              {missedProblems.map((p, i) => (
+                                                  <li key={i} className="p-2 flex justify-between items-center hover:bg-blue-50/50">
+                                                      <span className="font-bold text-red-600 mr-2">{p.text}</span>
+                                                      <span className="text-gray-500 text-xs">{p.kana}</span>
+                                                  </li>
+                                              ))}
+                                          </ul>
                                       </div>
                                   </div>
                               </div>
