@@ -330,15 +330,23 @@ function Home({ onGameStart }: HomeProps) {
         </div>
       )}
 
-<<<<<<< HEAD
-      <footer className="absolute bottom-2 text-[#14532d] font-bold text-sm z-30 opacity-80">
-        © 2025 Brain Garden Project 
-=======
-      <footer className="fixed bottom-2 text-[#14532d] font-bold text-sm z-30 opacity-80">
-        © 2025 Brain Garden Project
-　　　  <br />
-  　　　効果音提供　オトロジック（https://otologic.jp）
->>>>>>> 389abfe8d20c2b34d39c0cad2818e48715e3b219
+      <footer className="fixed bottom-2 w-full text-center text-[#14532d] font-bold text-sm z-30 opacity-80 pointer-events-none">
+        {/* コンテンツ部分はクリック可能にするために pointer-events-auto を指定 */}
+        <div className="pointer-events-auto">
+          <p>© 2025 Brain Garden Project</p>
+          <p className="mt-1">
+            効果音提供 オトロジック（
+            <a 
+              href="https://otologic.jp" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              https://otologic.jp
+            </a>
+            ）
+          </p>
+        </div>
       </footer>
       <div className="absolute bottom-0 left-0 w-full h-16 theme-garden-ground z-20"></div>
     </div>
