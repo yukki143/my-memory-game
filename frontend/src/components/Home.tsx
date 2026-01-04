@@ -331,7 +331,7 @@ function Home({ onGameStart }: HomeProps) {
       )}
 
       <footer className="absolute bottom-2 text-[#14532d] font-bold text-sm z-30 opacity-80">
-        © 2025 Brain Garden Project
+        © 2025 Brain Garden Project 
       </footer>
       <div className="absolute bottom-0 left-0 w-full h-16 theme-garden-ground z-20"></div>
     </div>
