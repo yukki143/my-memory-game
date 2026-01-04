@@ -1,5 +1,5 @@
 // frontend/src/context/SettingsContext.tsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState} from 'react';
 import { type GlobalSettings, DEFAULT_GLOBAL_SETTINGS } from '../types';
 
 // Contextの型定義
