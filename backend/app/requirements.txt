@@ -6,7 +6,4 @@ python_jose==3.5.0
 SQLAlchemy==2.0.45
 uvicorn==0.40.0
 websockets==13.1
-pip freeze > backend/requirements.txt
-git add backend/requirements.txt
-git commit -m "Add backend requirements.txt for Render"
-git push
+psycopg2-binary==2.9.9
