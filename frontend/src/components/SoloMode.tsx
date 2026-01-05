@@ -300,7 +300,8 @@ function SoloMode({ onBack }: SoloModeProps) {
         {/* PLAYING */}
         {gameState === 'playing' && (
           <div className="w-full flex flex-col items-center">
-            <div className="w-full max-w-[400px] md:max-w-2xl mb-6 px-4">
+            {/* ★修正: モバイル時に上部マージン(mt-16)を追加してボタンとの重なりを防ぐ */}
+            <div className="w-full max-w-[400px] md:max-w-2xl mb-6 px-4 mt-16 md:mt-0">
               <div className="flex items-baseline gap-1 mb-2 px-2 text-[#FEF3C7] drop-shadow-[0_2px_2px_rgba(0,0,0,0.3)]">
                 <span className="text-4xl font-black">
                   {CONDITION_TYPE === 'score' ? score : totalAttempted}
@@ -319,8 +320,9 @@ function SoloMode({ onBack }: SoloModeProps) {
               </div>
             </div>
 
+            {/* ★修正: モバイル時の aspect-[9/16] を削除し h-[60vh] に変更して高さを抑制 */}
             <div className="bg-white/95 rounded-3xl overflow-hidden shadow-2xl text-black border-8 border-[#d4a373]
-                            w-[85vw] max-w-[400px] aspect-[9/16] md:w-auto md:max-w-none md:h-[65vh] md:aspect-[16/9]">
+                            w-[85vw] max-w-[400px] h-[60vh] min-h-[450px] md:w-auto md:max-w-none md:h-[65vh] md:aspect-[16/9]">
               {isMobile ? (
                 <GameMobile 
                     onScore={handleScore} 

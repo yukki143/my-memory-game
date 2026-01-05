@@ -97,6 +97,11 @@ DEFAULT_MEMORY_SETS = {
         {"text": "grape", "kana": "ブドウ"},
         {"text": "orange", "kana": "オレンジ"},
         {"text": "peach", "kana": "モモ"},
+        {"text": "watermelon", "kana": "スイカ"},
+        {"text": "kiwifruit", "kana": "キウイ"},
+        {"text": "lemon", "kana": "レモン"},
+        {"text": "strawberry", "kana": "イチゴ"},
+        {"text": "mango", "kana": "マンゴー"},
     ],
     "programming": [
         {"text": "Python", "kana": "パイソン"},
