@@ -226,7 +226,7 @@ function Home({ onGameStart }: HomeProps) {
         )}
       </div> 
 
-      {/* ログインバッジ / ログインボタン (修正点) */}
+      {/* ログインバッジ / ログインボタン */}
       {username ? (
         <div 
           onClick={() => setShowLogoutModal(true)}
@@ -250,6 +250,7 @@ function Home({ onGameStart }: HomeProps) {
       )}
 
       {/* メインコンテンツ */}
+      {/* 既存: isMobileModeSelectionがtrueのときはhiddenになる */}
       <div className={`w-full max-w-6xl grid grid-cols-1 md:grid-cols-2 gap-12 items-center z-10 transition-opacity duration-300 ${isMobileModeSelection ? 'hidden md:grid' : 'grid'}`}>
         <div className="space-y-10 text-center md:text-center">
           <header className="relative">
@@ -295,7 +296,34 @@ function Home({ onGameStart }: HomeProps) {
         </div>
       </div>
 
-      {/* モーダル類 */}
+      {/* ★追加: モバイル用モード選択メニュー */}
+      {isMobileModeSelection && (
+        <div className="w-full max-w-sm flex flex-col gap-6 z-20 animate-fade-in md:hidden p-4">
+          <h2 className="text-4xl font-black text-center text-[#556b2f] text-stroke-white drop-shadow-md mb-4">
+            SELECT MODE
+          </h2>
+          <button 
+            onClick={() => navigate('/memory-sets')} 
+            className="theme-leaf-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
+          >
+            <span>👤 ソロプレイ</span>
+          </button>
+          <button 
+            onClick={() => navigate('/lobby')} 
+            className="theme-flower-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
+          >
+            <span>⚔️ マルチプレイ</span>
+          </button>
+          <button 
+            onClick={() => setIsMobileModeSelection(false)} 
+            className="mt-4 bg-white/80 text-[#8d6e63] font-bold py-4 rounded-xl border-2 border-[#d7ccc8] shadow-sm hover:bg-[#efebe9]"
+          >
+            戻る
+          </button>
+        </div>
+      )}
+
+      {/* モーダル類 (PC用) */}
       {showModeSelect && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
               <div className="theme-white-wood-card p-8 max-w-lg w-full">
@@ -331,7 +359,6 @@ function Home({ onGameStart }: HomeProps) {
       )}
 
       <footer className="fixed bottom-2 w-full text-center text-[#14532d] font-bold text-sm z-30 opacity-80 pointer-events-none">
-        {/* コンテンツ部分はクリック可能にするために pointer-events-auto を指定 */}
         <div className="pointer-events-auto">
           <p>© 2025 Brain Garden Project</p>
           <p className="mt-1">
