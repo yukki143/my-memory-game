@@ -68,7 +68,7 @@ export default function MemorySetList() {
     <div className="min-h-screen relative flex flex-col items-center overflow-hidden font-hakoniwa text-[#5d4037]">
       <div className="fixed inset-0 pointer-events-none"><ForestPath overlayOpacity={0.2} /></div>
 
-      <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 backdrop-blur-md shadow-md border-b-4 border-[#8d6e63]">
+      <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 shadow-md border-b-4 border-[#8d6e63]">
         <button onClick={() => navigate('/')} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
           ← ホームに戻る
         </button>

@@ -297,7 +297,7 @@ function Home({ onGameStart }: HomeProps) {
 
       {/* モーダル類 */}
       {showModeSelect && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-[2px]">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
               <div className="theme-white-wood-card p-8 max-w-lg w-full">
                   <h3 className="text-2xl font-black mb-8 text-center text-[#FFFFFF]">プレイスタイルを選択</h3>
                   <div className="grid gap-6">
