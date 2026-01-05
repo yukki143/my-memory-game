@@ -318,7 +318,7 @@ function Home({ onGameStart }: HomeProps) {
       )}
 
       {showLogoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 animate-fade-in">
             <div className="bg-white p-8 rounded-2xl shadow-2xl border-4 border-[#8d6e63] max-w-sm w-full text-center relative">
                 <div className="text-5xl mb-4">👋</div>
                 <h3 className="text-xl font-black text-[#5d4037] mb-2">ログアウトしますか？</h3>

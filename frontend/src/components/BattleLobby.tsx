@@ -331,7 +331,7 @@ export default function BattleLobby() {
 
       {/* モーダル (変更なし) */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-[2px] animate-fade-in">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
             <div className="theme-white-wood-card p-6 w-full max-w-md animate-pop-in relative">
                 <h2 className="text-2xl font-black mb-6 text-center text-[#5d4037] border-b-4 border-[#d7ccc8] pb-2">
                     ルーム作成
