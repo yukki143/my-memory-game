@@ -105,9 +105,7 @@ function BattleMode() {
   }, []);
 
   const joinRoom = () => {
-    // ★修正: 環境変数からURLを取得し、ws/wssプロトコルに変換するロジックを追加
     const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-    // http -> ws, https -> wss に置換
     const WS_BASE = API_BASE.replace(/^http/, 'ws');
     
     const ws = new WebSocket(`${WS_BASE}/ws/${roomId}/${playerId}`);
@@ -131,7 +129,6 @@ function BattleMode() {
           command = msg;
       }
 
-      // 自分自身の送信したメッセージは、基本的にはここで処理しない（送信時に自明なため）
       if (senderId === playerId && command !== "MATCHED") return;
 
       if (command === "MATCHED") {
@@ -176,7 +173,6 @@ function BattleMode() {
       }
   };
 
-  // 放置防止用（どちらかがミスしたまま止まらないように）
   useEffect(() => {
     const isOneSideWaiting = (iMissed && !opponentMissed) || (!iMissed && opponentMissed);
     if (!isOneSideWaiting || gameStatus !== 'playing') return;
@@ -186,17 +182,14 @@ function BattleMode() {
     return () => clearTimeout(timer);
   }, [iMissed, opponentMissed, gameStatus]);
 
-  // 両者ミス時の同期
   useEffect(() => {
     if (opponentMissed && iMissed && gameStatus === 'playing') {
         setTimeout(goNextRound, 500); 
     }
   }, [opponentMissed, iMissed, gameStatus]);
 
-  // ★修正: 再戦の準備が整ったかチェック
   useEffect(() => {
     if (isRetryReady && opponentRetryReady && isHost) {
-        // ホストが MATCHED を送信して全員の画面を切り替える
         wsSend("MATCHED");
     }
   }, [isRetryReady, opponentRetryReady, isHost]);
@@ -230,7 +223,6 @@ function BattleMode() {
     }
   };
 
-  // 相手のスコア監視による終了判定
   useEffect(() => {
     if (opponentScore === 0 || gameStatus !== 'playing') return;
     
@@ -246,7 +238,6 @@ function BattleMode() {
     }, 500);
   }, [opponentScore]);
   
-  // ★修正: 再戦のためにすべての統計情報をクリアする関数
   const prepareNextGame = () => {
     setMyScore(0);
     setOpponentScore(0);
@@ -417,11 +408,13 @@ function BattleMode() {
                             </div>
                         )}
 
-                        <div className="flex flex-col items-center justify-center shrink-0">
+                        {/* ★修正: shrink-0を削除し、flex-1とmin-w-0を追加して縮小可能に */}
+                        <div className="flex flex-col items-center justify-center flex-1 min-w-0">
                             <div className={`
                                 overflow-hidden animate-pop-in relative
                                 ${isMobile ? 'w-[90vw] h-[70vh] min-h-[550px] mt-4 bg-[#fff8e1] rounded-3xl border-4 border-[#d4a373] shadow-xl flex flex-col' 
-                                           : 'bg-white/90 rounded-3xl shadow-2xl border-8 border-[#d4a373] w-[95vw] max-w-5xl h-[70vh] min-h-[500px]'}
+                                           // ★修正: w-[95vw] を w-full に変更
+                                           : 'bg-white/90 rounded-3xl shadow-2xl border-8 border-[#d4a373] w-full max-w-5xl h-[70vh] min-h-[500px]'}
                             `}>
                                 {isMobile ? (
                                     <GameMobile 

@@ -9,7 +9,7 @@ import { DEFAULT_SETTINGS } from '../types';
 // 公式テンプレート (固定データ)
 // ★修正: IDをバックエンドの DEFAULT_MEMORY_SETS と一致させる
 const OFFICIAL_SETS: MemorySet[] = [
-  { id: "default", name: "基本セット (フルーツ)", title: "基本セット (フルーツ)", words: new Array(6) },
+  { id: "default", name: "基本セット (フルーツ)", title: "基本セット (フルーツ)", words: new Array(11) },
   { id: "programming", name: "プログラミング用語", title: "プログラミング用語", words: new Array(6) },
   { id: "animals", name: "動物の名前", title: "動物の名前", words: new Array(5) },
   { id: "english_hard", name: "超難問英単語", title: "超難問英単語", words: new Array(3) }, // hardmodeから修正
