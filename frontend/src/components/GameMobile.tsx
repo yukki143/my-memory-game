@@ -28,11 +28,13 @@ type Props = {
 type SlotItem = { text: string; sourceId: number; } | null;
 type ChoiceItem = { id: number; text: string; isUsed: boolean; };
 
+// ★修正: Stateの型定義に 'loading' を追加
+type GameState = 'memorize' | 'quiz' | 'waiting' | 'loading';
 
 // --- ここからコンポーネント ---
 function GameMobile({ 
   onScore, onWrong, resetKey, isSoloMode = false, 
-  roomId, setId, playerId, // ★ Propsから受け取る
+  roomId, setId, playerId, 
   seed, settings, wrongHistory, totalAttempted 
 }: Props) {
 
@@ -40,9 +42,7 @@ function GameMobile({
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
 
-  // ★ WebSocketの接続処理はコンポーネントの「中」に移動
   useEffect(() => {
-    // ソロモードの時は接続不要
     if (isSoloMode || !roomId || !playerId) return;
 
     const wsUrl = `${WS_BASE}/ws/battle/${roomId}/${playerId}?setName=${setId}`;
@@ -56,9 +56,10 @@ function GameMobile({
     return () => {
       socket.close();
     };
-  }, [roomId, playerId, setId, isSoloMode]); // 依存配列に Props を指定
+  }, [roomId, playerId, setId, isSoloMode]);
 
-  const [gameState, setGameState] = useState<'memorize' | 'quiz' | 'waiting'>('memorize');
+  // ★修正: 初期状態を 'loading' に変更
+  const [gameState, setGameState] = useState<GameState>('loading');
   const [problems, setProblems] = useState<Problem[]>([]);
   const [slots, setSlots] = useState<SlotItem[]>([]);
   const [choices, setChoices] = useState<ChoiceItem[]>([]);
@@ -68,7 +69,6 @@ function GameMobile({
   
   const latestRequestId = useRef(0);
 
-  // ★追加: 最新の統計データを保持するRef
   const totalAttemptedRef = useRef(totalAttempted);
   const wrongHistoryRef = useRef(wrongHistory);
   useEffect(() => { totalAttemptedRef.current = totalAttempted; }, [totalAttempted]);
@@ -78,8 +78,9 @@ function GameMobile({
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
 
-      // 演出とステートのリセット
-      setGameState('waiting');
+      // ★修正: 読み込み開始時は 'loading' に設定し、回答画面のチラつきを防ぐ
+      setGameState('loading');
+      
       setOverlayMark(null);
       setProblems([]);
       setSlots(Array(splitCount).fill(null));
@@ -97,7 +98,6 @@ function GameMobile({
               if (setId) params.append("set_id", setId);
               if (seed) params.append("seed", `${seed}-${i}`);
               
-              // ★Refから最新値を取得
               if (wrongHistoryRef.current && wrongHistoryRef.current.length > 0) {
                   params.append("wrong_history", wrongHistoryRef.current.join(","));
               }
@@ -129,12 +129,13 @@ function GameMobile({
           
           setChoices(shuffled);
           setTimeLeft(MEMORIZE_TIME);
+          
+          // データが揃ってから 'memorize' に遷移
           setGameState('memorize');
 
       } catch (e) {
           console.error("Fetch error:", e);
       }
-      // ★依存配列から統計データを削除
   }, [roomId, setId, seed, MEMORIZE_TIME, splitCount]);
 
   useEffect(() => { 
@@ -185,7 +186,6 @@ function GameMobile({
       }
   };
 
-  // ★ 決定ボタンを押した時の判定処理
   const handleSubmit = () => {
       if (slots.some(s => s === null) || gameState === 'waiting') return; 
       setGameState('waiting');
@@ -194,11 +194,9 @@ function GameMobile({
       setOverlayMark(isCorrect);
 
       if (isCorrect) {
-          // ★ 正解音
           playSE('/sounds/se_correct.mp3');
           onScore();
       } else {
-          // ★ 不正解音
           playSE('/sounds/se_wrong.mp3');
           onWrong(problems[0]);
       }
@@ -208,6 +206,14 @@ function GameMobile({
 
   return (
     <div className="relative p-2 bg-orange-50 h-full flex flex-col items-center w-full overflow-hidden">
+      
+      {/* ★追加: Loading中の表示 (これが出ている間は回答画面が出ない) */}
+      {gameState === 'loading' && (
+        <div className="flex-1 flex items-center justify-center w-full h-full">
+            <div className="text-xl font-black text-[#8d6e63] animate-pulse">Loading...</div>
+        </div>
+      )}
+
       {gameState === 'memorize' && (
         <div className="w-full h-2 bg-gray-300 rounded-full mb-2 shrink-0 overflow-hidden relative">
           <style>{`@keyframes shrink-mobile { from { width: 100%; } to { width: 0%; } }`}</style>
@@ -237,6 +243,7 @@ function GameMobile({
         </div>
       )}
 
+      {/* ★修正: loading中は表示しないようにガード */}
       {(gameState === 'quiz' || gameState === 'waiting') && (
         <div className="flex-1 flex flex-col w-full max-w-sm h-full overflow-hidden">
             <div className="flex-1 w-full overflow-y-auto min-h-0 relative">
