@@ -50,7 +50,7 @@ export default function SettingsModal({ currentSettings, onClose, onSave }: Prop
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 backdrop-blur-[2px] animate-fade-in">
       <div className="theme-white-wood-card p-8 max-w-md w-full relative shadow-2xl">
         <button 
           type="button" 

@@ -297,7 +297,7 @@ function Home({ onGameStart }: HomeProps) {
 
       {/* モーダル類 */}
       {showModeSelect && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-[2px]">
               <div className="theme-white-wood-card p-8 max-w-lg w-full">
                   <h3 className="text-2xl font-black mb-8 text-center text-[#FFFFFF]">プレイスタイルを選択</h3>
                   <div className="grid gap-6">
@@ -318,7 +318,7 @@ function Home({ onGameStart }: HomeProps) {
       )}
 
       {showLogoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4 animate-fade-in">
             <div className="bg-white p-8 rounded-2xl shadow-2xl border-4 border-[#8d6e63] max-w-sm w-full text-center relative">
                 <div className="text-5xl mb-4">👋</div>
                 <h3 className="text-xl font-black text-[#5d4037] mb-2">ログアウトしますか？</h3>

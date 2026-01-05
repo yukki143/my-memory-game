@@ -35,10 +35,10 @@ export default function ForestPath({ }: ForestPathProps) {
 
   // 星のデータ生成 (現在のロジックを維持)
   const stars = useMemo(() => {
-    return Array.from({ length: 200 }).map((_, i) => {
+    return Array.from({ length: 150 }).map((_, i) => {
       const top = Math.random() * 100; 
       const left = Math.random() * 100;
-      const size = 1 + Math.random() * 3;
+      const size = 1 + Math.random() * 2;
       const color = PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
       const delay = Math.random() * 3;
 
@@ -52,6 +52,7 @@ export default function ForestPath({ }: ForestPathProps) {
           backgroundColor: color,
           boxShadow: `0 0 ${size + 1}px ${color}`, 
           animationDelay: `${delay}s`,
+          willChange: 'opacity',
         }
       };
     });

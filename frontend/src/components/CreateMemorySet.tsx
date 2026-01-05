@@ -247,7 +247,7 @@ export default function CreateMemorySet() {
       </div>
 
       {showSuccessModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[2px] animate-fade-in">
           <div className="theme-white-wood-card p-8 max-w-md w-full text-center shadow-2xl transform scale-105">
             <div className="text-6xl mb-4">🎉</div>
             <h2 className="text-3xl font-black text-[#556b2f] mb-2">完了！</h2>
