@@ -216,6 +216,7 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
     }
     const targetProblem = problems[index];
     if (targetProblem && targetProblem.text.startsWith(val)) {
+        playSE('/sounds/se_type.mp3');
         newVals[index] = val;
         setInputVals(newVals);
         setIsError(false);
