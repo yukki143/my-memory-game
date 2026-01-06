@@ -306,13 +306,13 @@ function Home({ onGameStart }: HomeProps) {
             onClick={() => navigate('/memory-sets')} 
             className="theme-leaf-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
           >
-            <span>👤 ソロプレイ</span>
+            <span>ソロプレイ</span>
           </button>
           <button 
             onClick={() => navigate('/lobby')} 
             className="theme-flower-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
           >
-            <span>⚔️ マルチプレイ</span>
+            <span>マルチプレイ</span>
           </button>
           <button 
             onClick={() => setIsMobileModeSelection(false)} 
