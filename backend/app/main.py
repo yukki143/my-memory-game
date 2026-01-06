@@ -396,7 +396,7 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
 frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
 
 if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="BrainGarden")
     
     @app.exception_handler(404)
     async def not_found_exception_handler(request, exc):
