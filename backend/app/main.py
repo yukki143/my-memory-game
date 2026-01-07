@@ -32,10 +32,10 @@ models.Base.metadata.create_all(bind=engine)
 # --- FastAPIアプリ定義 ---
 app = FastAPI()
 
-# main.py の app = FastAPI() の直後あたりに追加
-@app.get("/")
-async def root():
-    return {"message": "Backend is running"}
+# # main.py の app = FastAPI() の直後あたりに追加
+# @app.get("/")
+# async def root():
+#     return {"message": "Backend is running"}
 
 # ★追加: ルーターの登録
 app.include_router(memory_sets.router)
