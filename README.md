@@ -111,15 +111,23 @@
 
 ---
 
-## スクリーンショット（ここに入れると強い）
+## ホーム画面
 
-> https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d
+![ホーム画面](./frontend/src/assets/BrainGarden.png)
 
-```md
-![BrainGarden](https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d)
-<img width="1906" height="941" alt="BrainGarden" src="https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d" />
+### 箱庭デザイン × 一日の流れ（朝→昼→夜）
+ホーム画面は「箱庭」をイメージし、時間の移ろい（朝→昼→夜）を取り入れました。  
+ゲームを開くたびに雰囲気が変わることで、暗記を繰り返しても飽きにくい画面設計を目指しています。
 
-```
+- **朝 / 昼 / 夜の演出**をホームに組み込み、気分が切り替わる体験に
+- 配色・UI・アニメーションを統一し、**世界観の一貫性**を重視
+- 「勉強」ではなく「遊び」として入りやすいよう、**没入感**を設計
+
+![プレイ画面](./frontend/src/assets/playscreen.png)
+
+### 静かな背景で、記憶に集中する
+プレイ画面は情報量を減らし、緑を基調に目に優しく。  
+長く遊んでも疲れにくい **集中のための背景** を目指しました。
 
 ---
 
