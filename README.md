@@ -116,9 +116,8 @@
 > https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d
 
 ```md
-![BrainGarden](https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d)
-<img width="1906" height="941" alt="BrainGarden" src="https://github.com/user-attachments/assets/be427616-3f06-4516-9b27-34349e20e20d" />
-
+![BrainGarden](https://github.com/yukki143/my-memory-game/blob/main/frontend/src/assets/BrainGarden.png)
+<img width="1906" height="941" alt="BrainGarden" src="https://github.com/yukki143/my-memory-game/blob/main/frontend/src/assets/BrainGarden.png" />
 ```
 
 ---
