@@ -32,6 +32,11 @@ models.Base.metadata.create_all(bind=engine)
 # --- FastAPIアプリ定義 ---
 app = FastAPI()
 
+# main.py の app = FastAPI() の直後あたりに追加
+@app.get("/")
+async def root():
+    return {"message": "Backend is running"}
+
 # ★追加: ルーターの登録
 app.include_router(memory_sets.router)
 
@@ -68,6 +73,7 @@ class RoomInfo(BaseModel):
     playerCount: int = 0
     memorySetId: str = "default"
     memorizeTime: int = 3
+    answerTime: int = 10 # ★追加: 回答制限時間
     questionsPerRound: int = 1
     seed: Optional[str] = None 
 
@@ -187,6 +193,7 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
             words=json.loads(s.words_json) if s.words_json else [],
             owner_id=s.owner_id,
             memorize_time=s.memorize_time,
+            answer_time=s.answer_time, # ★追加: 回答制限時間をレスポンスに含める
             questions_per_round=s.questions_per_round,
             win_score=s.win_score,
             condition_type=s.condition_type,
@@ -277,19 +284,21 @@ def create_room(req: CreateRoomRequest, db: Session = Depends(get_db)):
     if req.name in active_rooms:
         raise HTTPException(status_code=400, detail="そのルーム名は既に使用されています")
     
-    mem_time, q_per_round = 3, 1
+    mem_time, ans_time, q_per_round = 3, 10, 1 # ★ans_timeを追加
     cond_type, win_score = req.conditionType, req.winScore
 
     if req.memorySetId != "default" and req.memorySetId.isdigit():
         db_set = db.query(models.MemorySet).filter(models.MemorySet.id == int(req.memorySetId)).first()
         if db_set:
             mem_time = db_set.memorize_time
+            ans_time = db_set.answer_time # ★メモリーセットから回答制限時間を取得
             q_per_round = db_set.questions_per_round
 
     new_room = RoomInfo(
         id=req.name, name=req.name, hostName=req.hostName,
         isLocked=req.password != "", winScore=win_score,
         memorySetId=req.memorySetId, memorizeTime=mem_time,
+        answerTime=ans_time, # ★ルーム情報に適用
         questionsPerRound=q_per_round, conditionType=cond_type
     )
     

@@ -1,5 +1,6 @@
+// frontend/src/components/CreateMemorySet.tsx
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom'; // ★ useParams追加
+import { useNavigate, useParams } from 'react-router-dom';
 import { authFetch } from '../utils/auth';
 import ForestPath from './ForestPath';
 
@@ -10,11 +11,12 @@ type WordItem = {
 
 export default function CreateMemorySet() {
   const navigate = useNavigate();
-  const { id } = useParams(); // URLパラメータからIDを取得
-  const isEditMode = Boolean(id); // IDがあれば編集モード
+  const { id } = useParams();
+  const isEditMode = Boolean(id);
 
   const [title, setTitle] = useState("");
   const [memorizeTime, setMemorizeTime] = useState(3);
+  const [answerTime, setAnswerTime] = useState(10); // ★追加: 回答制限時間のステート
   const [questionsPerRound, setQuestionsPerRound] = useState(1);
   const [winScore, setWinScore] = useState(10);
   const [conditionType, setConditionType] = useState<'score' | 'total'>('score');
@@ -28,7 +30,6 @@ export default function CreateMemorySet() {
   const [loading, setLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-  // ★追加: 編集モードの場合、初期データをロード
   useEffect(() => {
     if (isEditMode) {
       loadSetData();
@@ -44,9 +45,10 @@ export default function CreateMemorySet() {
       setTitle(data.title);
       setWords(data.words);
       if (data.memorize_time) setMemorizeTime(data.memorize_time);
+      if (data.answer_time) setAnswerTime(data.answer_time); // ★追加: 回答時間をロード
       if (data.questions_per_round) setQuestionsPerRound(data.questions_per_round);
       if (data.win_score) setWinScore(data.win_score);
-      if (data.condition_type) setConditionType(data.condition_type as 'score' | 'total'); // ★追加
+      if (data.condition_type) setConditionType(data.condition_type as 'score' | 'total');
       if (data.order_type) setOrderType(data.order_type);
     } catch (e) {
       alert("読み込みエラー");
@@ -71,7 +73,6 @@ export default function CreateMemorySet() {
     setWords(newWords);
   };
 
-  // ★修正: 送信処理 (作成/更新の分岐 & モーダル表示)
   const handleSubmit = async () => {
     if (!title.trim()) return alert("タイトルを入力してください");
     
@@ -88,6 +89,7 @@ export default function CreateMemorySet() {
             title, 
             words: validWords,
             memorize_time: memorizeTime,
+            answer_time: answerTime, // ★追加: 回答時間を送信
             questions_per_round: questionsPerRound,
             win_score: winScore,
             condition_type: conditionType,
@@ -100,7 +102,6 @@ export default function CreateMemorySet() {
     } catch (e) { alert("エラーが発生しました"); }
   };
 
-  // 削除処理
   const handleDelete = async () => {
     if (!window.confirm("本当に削除しますか？\nこの操作は取り消せません。")) return;
     
@@ -114,14 +115,14 @@ export default function CreateMemorySet() {
     }
   };
 
-  // ★追加: モーダルで「続けて作成」を選んだ時のリセット処理
   const handleReset = () => {
     if (isEditMode) {
-      // 編集モードでリセットしたら新規作成モードへ移行
       navigate('/create-set');
     }
     setTitle("");
     setWords([{ text: "", kana: "" }, { text: "", kana: "" }, { text: "", kana: "" }]);
+    setMemorizeTime(3);
+    setAnswerTime(10); // ★リセット
     setShowSuccessModal(false);
   };
 
@@ -139,7 +140,6 @@ export default function CreateMemorySet() {
 
       <div className="flex-1 w-full max-w-7xl p-4 z-10 overflow-y-auto pb-24">
   
-        {/* タイトル入力（これは上部に全幅で配置） */}
         <div className="bg-white/90 p-6 rounded-3xl shadow-xl border-4 border-[#d7ccc8] mb-6">
           <label className="block font-bold mb-2 text-lg">タイトル</label>
           <input 
@@ -150,10 +150,8 @@ export default function CreateMemorySet() {
           />
         </div>
 
-        {/* ▼ PC版で2カラム、スマホで1カラムにするグリッドレイアウト ▼ */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          {/* 左カラム：設定エリア (全体の4割程度を使用) */}
           <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-4">
             <div className="bg-[#fff8e1] p-6 rounded-3xl shadow-xl border-4 border-[#8d6e63] relative overflow-hidden">
               <div className="absolute -right-4 -top-4 text-6xl opacity-10">⚙️</div>
@@ -168,6 +166,17 @@ export default function CreateMemorySet() {
                       className="w-full accent-[#8d6e63]"
                       value={memorizeTime} onChange={e => setMemorizeTime(Number(e.target.value))} />
                     <span className="font-black text-2xl w-10 text-right">{memorizeTime}</span>
+                  </div>
+                </div>
+
+                {/* ★追加: 回答時間 */}
+                <div>
+                  <label className="block font-bold mb-1 text-sm">回答時間 (秒)</label>
+                  <div className="flex items-center gap-2">
+                    <input type="range" min="1" max="30" step="1" 
+                      className="w-full accent-[#8d6e63]"
+                      value={answerTime} onChange={e => setAnswerTime(Number(e.target.value))} />
+                    <span className="font-black text-2xl w-10 text-right">{answerTime}</span>
                   </div>
                 </div>
 
@@ -209,7 +218,6 @@ export default function CreateMemorySet() {
                   </div>
                 </div>
 
-                {/* 終了条件 */}
                 <div className="border-t-2 border-[#d7ccc8] pt-4">
                   <label className="block font-bold mb-2 text-sm">ゲーム終了条件</label>
                   <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden mb-3">
@@ -225,7 +233,6 @@ export default function CreateMemorySet() {
             </div>
           </div>
 
-          {/* 右カラム：単語リストエリア (残りのスペースを使用) */}
           <div className="lg:col-span-7 space-y-4">
             <h3 className="font-black text-lg px-2 flex items-center gap-2">メモリーリスト</h3>
             {words.map((word, i) => (

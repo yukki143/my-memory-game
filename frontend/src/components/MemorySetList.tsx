@@ -12,7 +12,7 @@ const OFFICIAL_SETS: MemorySet[] = [
   { id: "default", name: "基本セット (フルーツ)", title: "基本セット (フルーツ)", words: new Array(11) },
   { id: "programming", name: "プログラミング用語", title: "プログラミング用語", words: new Array(6) },
   { id: "animals", name: "動物の名前", title: "動物の名前", words: new Array(5) },
-  { id: "english_hard", name: "超難問英単語", title: "超難問英単語", words: new Array(3) }, // hardmodeから修正
+  { id: "english_hard", name: "超難問英単語", title: "超難問英単語", words: new Array(3) }, 
 ];
 
 export default function MemorySetList() {
@@ -51,6 +51,7 @@ export default function MemorySetList() {
     const settings = {
         ...DEFAULT_SETTINGS,
         memorizeTime: set.memorize_time || 3,
+        answerTime: set.answer_time || 10, // ★追加: セットに保存された回答時間を反映
         questionsPerRound: set.questions_per_round || 1,
         clearConditionValue: set.win_score || 10,
         conditionType: set.condition_type || 'score',
@@ -108,6 +109,7 @@ export default function MemorySetList() {
                     <div className="text-sm opacity-70 font-mono flex flex-wrap gap-x-3 gap-y-1">
                        <span>📚 {set.words ? set.words.length : 0}語</span>
                        <span>⏱️ {set.memorize_time || 3}秒</span>
+                       <span>⏰ {set.answer_time || 10}秒</span> {/* ★回答時間を表示 */}
                        <span>📝 {set.questions_per_round || 1}問/回</span>
                        <span className="font-bold text-[#d97706]">
                          🏆 {set.win_score || 10}

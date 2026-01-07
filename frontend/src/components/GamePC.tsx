@@ -29,6 +29,7 @@ type ApiResponse = {
 export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, roomId, playerId, setId, seed, wrongHistory, totalAttempted, isSoloMode }: GamePCProps) {
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
+  const ANSWER_TIME = settings?.answerTime || 10;
 
   // --- useEffectの中の接続処理 ---
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
   const [results, setResults] = useState<(boolean | null)[]>([]);
   const [isError, setIsError] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
+  const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME);
 
   const latestRequestId = useRef(0);
   const isProcessing = useRef(false);
@@ -82,6 +84,7 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
     setProblems([]);
     setInputVals(Array(splitCount).fill(""));
     setTimeLeft(MEMORIZE_TIME);
+    setAnswerTimeLeft(ANSWER_TIME);
     setGameState('waiting');
 
     try {
@@ -116,7 +119,7 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
         isProcessing.current = false;
     }
     // ★依存配列から totalAttempted と wrongHistory を削除
-  }, [splitCount, roomId, setId, seed, MEMORIZE_TIME]);
+  }, [splitCount, roomId, setId, seed, MEMORIZE_TIME, ANSWER_TIME]);
 
   useEffect(() => { 
       if (resetKey >= 0) loadProblem(); 
@@ -133,15 +136,18 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
     }
   }, [gameState, timeLeft]);
 
+  // ★追加: 解答フェーズのカウントダウンロジック
   useEffect(() => {
-      if (gameState === 'answer') {
-          setTimeout(() => {
-              if (inputRefs.current[0]) {
-                  inputRefs.current[0]?.focus();
-              }
-          }, 50);
-      }
-  }, [gameState]);
+    if (gameState === 'answer' && !isProcessing.current) {
+        if (answerTimeLeft > 0) {
+            const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        } else {
+            // 0秒になったら自動でEnterキー処理（判定）を実行
+            handleEnterKey();
+        }
+    }
+  }, [gameState, answerTimeLeft]);
 
   const getFontSize = (text: string) => {
     const len = text.length;
@@ -245,6 +251,13 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
         .animate-shake { animation: shake 0.2s ease-in-out 2; }
       `}</style>
 
+      <style>{`
+        @keyframes shrink-answer-bar {
+          from { width: 100%; }
+          to { width: 0%; }
+        }
+      `}</style>
+
       {/* 〇表示 */}
       {results.every(r => r === true) && results.length > 0 && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
@@ -287,6 +300,22 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
                     </div>
                 ))}
             </div>
+        </div>
+      )}
+
+      {/* ★修正: 解答フェーズ中の残り時間バー */}
+      {gameState === 'answer' && (
+        <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
+          <div 
+            /* key に resetKey を含めることで、次の問題に進むたびにアニメーションがリセットされます */
+            key={`answer-bar-${resetKey}`}
+            className="h-full bg-red-500"
+            style={{ 
+                width: '100%',
+                /* CSSアニメーションで滑らかに動かす（ANSWER_TIME秒かけて0%へ） */
+                animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` 
+            }}
+          />
         </div>
       )}
 

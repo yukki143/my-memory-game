@@ -12,6 +12,7 @@ class MemorySetBase(BaseModel):
     title: str
     words: List[WordItem]
     memorize_time: int = 3
+    answer_time: int = 10 # ★追加: 回答制限時間
     questions_per_round: int = 1
     win_score: int = 10
     condition_type: str = "score"

@@ -28,10 +28,8 @@ type Props = {
 type SlotItem = { text: string; sourceId: number; } | null;
 type ChoiceItem = { id: number; text: string; isUsed: boolean; };
 
-// ★修正: Stateの型定義に 'loading' を追加
 type GameState = 'memorize' | 'quiz' | 'waiting' | 'loading';
 
-// --- ここからコンポーネント ---
 function GameMobile({ 
   onScore, onWrong, resetKey, isSoloMode = false, 
   roomId, setId, playerId, 
@@ -41,33 +39,30 @@ function GameMobile({
   const { playSE } = useSound();
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
+  const ANSWER_TIME = settings?.answerTime || 10; // ★回答時間を設定から取得
 
   useEffect(() => {
     if (isSoloMode || !roomId || !playerId) return;
 
     const wsUrl = `${WS_BASE}/ws/battle/${roomId}/${playerId}?setName=${setId}`;
-    console.log("Connecting to:", wsUrl);
-    
     const socket = new WebSocket(wsUrl);
-
-    socket.onopen = () => console.log("WS Connected in GameMobile");
-    socket.onclose = () => console.log("WS Closed in GameMobile");
 
     return () => {
       socket.close();
     };
   }, [roomId, playerId, setId, isSoloMode]);
 
-  // ★修正: 初期状態を 'loading' に変更
   const [gameState, setGameState] = useState<GameState>('loading');
   const [problems, setProblems] = useState<Problem[]>([]);
   const [slots, setSlots] = useState<SlotItem[]>([]);
   const [choices, setChoices] = useState<ChoiceItem[]>([]);
   const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
+  const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME); // ★回答タイマー用State
   const [overlayMark, setOverlayMark] = useState<boolean | null>(null);
   
   const latestRequestId = useRef(0);
+  const isProcessing = useRef(false); // ★多重処理防止用
 
   const totalAttemptedRef = useRef(totalAttempted);
   const wrongHistoryRef = useRef(wrongHistory);
@@ -77,16 +72,16 @@ function GameMobile({
   const loadProblem = useCallback(async () => {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
+      isProcessing.current = false; // ★フラグリセット
 
-      // ★修正: 読み込み開始時は 'loading' に設定し、回答画面のチラつきを防ぐ
       setGameState('loading');
-      
       setOverlayMark(null);
       setProblems([]);
       setSlots(Array(splitCount).fill(null));
       setChoices([]);
       setSelectedChoiceId(null);
       setTimeLeft(MEMORIZE_TIME);
+      setAnswerTimeLeft(ANSWER_TIME); // ★回答タイマーリセット
 
       try {
           const newProblems: Problem[] = [];
@@ -97,7 +92,6 @@ function GameMobile({
               if (roomId) params.append("room_id", roomId);
               if (setId) params.append("set_id", setId);
               if (seed) params.append("seed", `${seed}-${i}`);
-              
               if (wrongHistoryRef.current && wrongHistoryRef.current.length > 0) {
                   params.append("wrong_history", wrongHistoryRef.current.join(","));
               }
@@ -129,19 +123,18 @@ function GameMobile({
           
           setChoices(shuffled);
           setTimeLeft(MEMORIZE_TIME);
-          
-          // データが揃ってから 'memorize' に遷移
           setGameState('memorize');
 
       } catch (e) {
           console.error("Fetch error:", e);
       }
-  }, [roomId, setId, seed, MEMORIZE_TIME, splitCount]);
+  }, [roomId, setId, seed, MEMORIZE_TIME, ANSWER_TIME, splitCount]);
 
   useEffect(() => { 
     if (resetKey >= 0) loadProblem(); 
   }, [resetKey, loadProblem]);
 
+  // 暗記タイマーの制御
   useEffect(() => {
     if (gameState === 'memorize') {
         if (timeLeft > 0) {
@@ -152,6 +145,30 @@ function GameMobile({
         }
     }
   }, [gameState, timeLeft]);
+
+  // ★回答タイマーの制御
+  useEffect(() => {
+    if (gameState === 'quiz' && !isProcessing.current) {
+        if (answerTimeLeft > 0) {
+            const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        } else {
+            // 時間切れ：強制的に不正解判定を実行
+            handleForceWrong();
+        }
+    }
+  }, [gameState, answerTimeLeft]);
+
+  // ★時間切れ時の強制不正解処理
+  const handleForceWrong = () => {
+    if (isProcessing.current || gameState === 'waiting') return;
+    isProcessing.current = true;
+    setGameState('waiting');
+    
+    setOverlayMark(false);
+    playSE('/sounds/se_wrong.mp3');
+    onWrong(problems[0]);
+  };
 
   const handleSelectChoice = (choiceId: number) => {
       const choice = choices.find(c => c.id === choiceId);
@@ -187,7 +204,8 @@ function GameMobile({
   };
 
   const handleSubmit = () => {
-      if (slots.some(s => s === null) || gameState === 'waiting') return; 
+      if (slots.some(s => s === null) || gameState === 'waiting' || isProcessing.current) return; 
+      isProcessing.current = true;
       setGameState('waiting');
       
       const isCorrect = slots.every((s, i) => s?.text === problems[i].text);
@@ -207,20 +225,35 @@ function GameMobile({
   return (
     <div className="relative p-2 bg-orange-50 h-full flex flex-col items-center w-full overflow-hidden">
       
-      {/* ★追加: Loading中の表示 (これが出ている間は回答画面が出ない) */}
+      {/* Loading中の表示 */}
       {gameState === 'loading' && (
         <div className="flex-1 flex items-center justify-center w-full h-full">
             <div className="text-xl font-black text-[#8d6e63] animate-pulse">Loading...</div>
         </div>
       )}
 
+      {/* 暗記フェーズのタイマーバー */}
       {gameState === 'memorize' && (
         <div className="w-full h-2 bg-gray-300 rounded-full mb-2 shrink-0 overflow-hidden relative">
           <style>{`@keyframes shrink-mobile { from { width: 100%; } to { width: 0%; } }`}</style>
           <div 
-            key={resetKey}
+            key={`memorize-${resetKey}`}
             className="h-full bg-orange-500" 
             style={{ animation: `shrink-mobile ${MEMORIZE_TIME}s linear forwards` }}
+          />
+        </div>
+      )}
+
+      {/* ★回答フェーズのタイマーバー（滑らかに減るアニメーション） */}
+      {gameState === 'quiz' && (
+        <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
+          <style>{`@keyframes shrink-answer-bar { from { width: 100%; } to { width: 0%; } }`}</style>
+          <div 
+            key={`answer-bar-${resetKey}`}
+            className="h-full bg-red-500"
+            style={{ 
+                animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` 
+            }}
           />
         </div>
       )}
@@ -243,7 +276,6 @@ function GameMobile({
         </div>
       )}
 
-      {/* ★修正: loading中は表示しないようにガード */}
       {(gameState === 'quiz' || gameState === 'waiting') && (
         <div className="flex-1 flex flex-col w-full max-w-sm h-full overflow-hidden">
             <div className="flex-1 w-full overflow-y-auto min-h-0 relative">

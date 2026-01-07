@@ -14,14 +14,12 @@ router = APIRouter(
 # --- パブリックなセット一覧取得 ---
 @router.get("/sets")
 def get_memory_sets(db: Session = Depends(get_db)):
-    # デフォルトのセット（DBにはない固定データ）
     response_sets = [
         {"id": "default", "name": "基本セット (フルーツ)"},
         {"id": "programming", "name": "プログラミング用語"},
         {"id": "animals", "name": "動物の名前"},
         {"id": "english_hard", "name": "超難問英単語"},
     ]
-    # DBに保存されている全セットも追加（必要に応じてフィルタリングしてください）
     db_sets = db.query(models.MemorySet).all()
     for s in db_sets:
         response_sets.append({"id": str(s.id), "name": s.title})
@@ -31,19 +29,14 @@ def get_memory_sets(db: Session = Depends(get_db)):
 @router.get("/my-sets", response_model=List[schemas.MemorySetResponse])
 def read_my_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sets = db.query(models.MemorySet).filter(models.MemorySet.owner_id == current_user.id).all()
-    # JSON文字列をオブジェクトに変換して返す必要があるが、
-    # schemas.py で from_attributes = True にしてあり、
-    # Pydanticのバリデーション時に words_json (str) -> words (list) の変換は自動では行われないため
-    # 手動で変換するか、モデル側でプロパティを用意するのが一般的。
-    # ここでは簡易的に辞書に変換して詰めます。
     results = []
     for s in sets:
-        # DBモデル -> 辞書
         s_dict = {
             "id": s.id,
             "title": s.title,
             "owner_id": s.owner_id,
             "memorize_time": s.memorize_time,
+            "answer_time": s.answer_time, # ★追加
             "questions_per_round": s.questions_per_round,
             "win_score": s.win_score,
             "condition_type": s.condition_type,
@@ -56,7 +49,6 @@ def read_my_memory_sets(current_user: models.User = Depends(get_current_user), d
 # --- 新規作成 ---
 @router.post("/my-sets", response_model=schemas.MemorySetResponse)
 def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # 単語リストをJSON文字列に変換して保存
     words_json_str = json.dumps([w.dict() for w in item.words], ensure_ascii=False)
     
     new_set = models.MemorySet(
@@ -64,6 +56,7 @@ def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User =
         words_json=words_json_str, 
         owner_id=current_user.id,
         memorize_time=item.memorize_time,
+        answer_time=item.answer_time, # ★追加
         questions_per_round=item.questions_per_round,
         win_score=item.win_score,
         condition_type=item.condition_type,
@@ -78,10 +71,9 @@ def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User =
         "words": json.loads(new_set.words_json)
     }
 
-# --- ★追加: 個別のセットを取得（編集用） ---
+# --- 個別のセットを取得 ---
 @router.get("/my-sets/{set_id}", response_model=schemas.MemorySetResponse)
 def read_single_memory_set(set_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # 自分のセットの中から探す
     memory_set = db.query(models.MemorySet).filter(
         models.MemorySet.id == set_id,
         models.MemorySet.owner_id == current_user.id
@@ -95,7 +87,7 @@ def read_single_memory_set(set_id: int, current_user: models.User = Depends(get_
         "words": json.loads(memory_set.words_json)
     }
 
-# --- ★追加: セットの更新 ---
+# --- セットの更新 ---
 @router.put("/my-sets/{set_id}", response_model=schemas.MemorySetResponse)
 def update_memory_set(set_id: int, item: schemas.MemorySetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     memory_set = db.query(models.MemorySet).filter(
@@ -106,10 +98,10 @@ def update_memory_set(set_id: int, item: schemas.MemorySetCreate, current_user: 
     if not memory_set:
         raise HTTPException(status_code=404, detail="Set not found or access denied")
     
-    # 値を更新
     memory_set.title = item.title
     memory_set.words_json = json.dumps([w.dict() for w in item.words], ensure_ascii=False)
     memory_set.memorize_time = item.memorize_time
+    memory_set.answer_time = item.answer_time # ★追加
     memory_set.questions_per_round = item.questions_per_round
     memory_set.win_score = item.win_score
     memory_set.condition_type = item.condition_type
@@ -123,7 +115,7 @@ def update_memory_set(set_id: int, item: schemas.MemorySetCreate, current_user: 
         "words": json.loads(memory_set.words_json)
     }
 
-# --- ★追加: セットの削除 ---
+# --- セットの削除 ---
 @router.delete("/my-sets/{set_id}")
 def delete_memory_set(set_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     memory_set = db.query(models.MemorySet).filter(
