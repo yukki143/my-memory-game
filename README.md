@@ -113,9 +113,7 @@
 
 ## ホーム画面
 
-```md
-<img width="1906" height="941" alt="BrainGarden" src="https://github.com/yukki143/my-memory-game/blob/main/frontend/src/assets/BrainGarden.png" />
-```
+![ホーム画面](./frontend/src/assets/BrainGarden.png)
 
 ---
 
