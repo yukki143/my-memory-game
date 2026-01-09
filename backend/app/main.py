@@ -13,15 +13,18 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # 自作モジュール
 from . import models, schemas, database
-from .database import engine
+from .database import engine, SessionLocal
 from .manager import manager
-# ★追加: 新しいファイルからのインポート
-from .dependencies import get_db, get_current_user, create_access_token, get_password_hash, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
+from .dependencies import (
+    get_db, get_current_user, create_access_token, 
+    get_password_hash, verify_password, ACCESS_TOKEN_EXPIRE_MINUTES
+)
 from .routers import memory_sets 
 
 load_dotenv()
@@ -29,72 +32,7 @@ load_dotenv()
 # --- DB初期化 ---
 models.Base.metadata.create_all(bind=engine)
 
-# --- FastAPIアプリ定義 ---
-app = FastAPI()
-
-# # main.py の app = FastAPI() の直後あたりに追加
-# @app.get("/")
-# async def root():
-#     return {"message": "Backend is running"}
-
-# ★追加: ルーターの登録
-app.include_router(memory_sets.router)
-
-# --- CORS設定 ---
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://braingarden.onrender.com",
-]
-origin_regex = r"^http://(localhost|127\.0\.0\.1):517\d$"
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=origin_regex,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ==========================
-#  ゲーム用データモデル・変数 (WebSocket/Room用)
-#  ※Room管理はstatefulなためmainに残しています
-# ==========================
-
-class RoomInfo(BaseModel):
-    id: str
-    name: str
-    hostName: str
-    isLocked: bool
-    winScore: int
-    conditionType: str = "score"
-    status: str = "waiting"
-    playerCount: int = 0
-    memorySetId: str = "default"
-    memorizeTime: int = 3
-    answerTime: int = 10 # ★追加: 回答制限時間
-    questionsPerRound: int = 1
-    seed: Optional[str] = None 
-
-class CreateRoomRequest(BaseModel):
-    name: str
-    hostName: str
-    password: str = ""
-    winScore: int
-    memorySetId: str 
-    conditionType: str = "score"
-
-class VerifyPasswordRequest(BaseModel):
-    roomId: str
-    password: str
-
-# メモリ内データ（ルーム管理用）
-active_rooms: Dict[str, RoomInfo] = {}
-room_passwords: Dict[str, str] = {}
-room_owner_tokens: Dict[str, str] = {}
-room_clients: Dict[str, Set[str]] = {}
-
+# --- 公式データの定義 ---
 DEFAULT_MEMORY_SETS = {
     "default": [
         {"text": "apple", "kana": "アップル"},
@@ -131,11 +69,105 @@ DEFAULT_MEMORY_SETS = {
     ],
 }
 
+# IDとタイトルのマッピング表（DB検索用）
+OFFICIAL_TITLE_MAP = {
+    "default": "基本セット (フルーツ)",
+    "programming": "プログラミング用語",
+    "animals": "動物の名前",
+    "english_hard": "超難問英単語"
+}
+
+def seed_official_sets():
+    db = SessionLocal()
+    try:
+        for set_key, words in DEFAULT_MEMORY_SETS.items():
+            title = OFFICIAL_TITLE_MAP.get(set_key, set_key)
+            exists = db.query(models.MemorySet).filter(
+                models.MemorySet.title == title,
+                models.MemorySet.is_official == True
+            ).first()
+            if not exists:
+                new_set = models.MemorySet(
+                    title=title,
+                    words_json=json.dumps(words, ensure_ascii=False),
+                    is_official=True,
+                    owner_id=None
+                )
+                db.add(new_set)
+        db.commit()
+    except Exception as e:
+        print(f"Seeding error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# --- FastAPIアプリ定義 ---
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    seed_official_sets()
+
+app.include_router(memory_sets.router)
+
+# --- CORS設定 ---
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://braingarden.onrender.com",
+]
+origin_regex = r"^http://(localhost|127\.0\.0\.1):517\d$"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_origin_regex=origin_regex,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ==========================
+#  データモデル
+# ==========================
+
+class RoomInfo(BaseModel):
+    id: str
+    name: str
+    hostName: str
+    isLocked: bool
+    winScore: int
+    conditionType: str = "score"
+    status: str = "waiting"
+    playerCount: int = 0
+    memorySetId: str = "default"
+    memorizeTime: int = 3
+    answerTime: int = 10
+    questionsPerRound: int = 1
+    seed: Optional[str] = None 
+
+class CreateRoomRequest(BaseModel):
+    name: str
+    hostName: str
+    password: str = ""
+    winScore: int
+    memorySetId: str 
+    conditionType: str = "score"
+
+class VerifyPasswordRequest(BaseModel):
+    roomId: str
+    password: str
+
+# メモリ内データ（ルーム管理用）
+active_rooms: Dict[str, RoomInfo] = {}
+room_passwords: Dict[str, str] = {}
+room_owner_tokens: Dict[str, str] = {}
+room_clients: Dict[str, Set[str]] = {}
+
 # ==========================
 #  API エンドポイント
 # ==========================
 
-# ランキング関連 (DB使用)
 @app.get("/api/ranking", response_model=List[schemas.RankEntry])
 def get_ranking(set_id: str, win_score: int, condition_type: str, db: Session = Depends(get_db)):
     results = db.query(models.Ranking).filter(
@@ -159,7 +191,6 @@ def post_ranking(entry: schemas.RankEntry, db: Session = Depends(get_db)):
     db.refresh(new_rank)
     return {"message": "Ranking updated"}
 
-# 認証関連
 @app.post("/api/register", response_model=schemas.UserResponse)
 def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.username == user.username).first()
@@ -173,7 +204,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
-@app.post("/token", response_model=schemas.Token)
+@app.post("/token")
 def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -184,7 +215,6 @@ def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db:
 
 @app.get("/api/users/me", response_model=schemas.UserResponse)
 def read_users_me(current_user: models.User = Depends(get_current_user)):
-    # ユーザー情報レスポンスの整形
     formatted_sets = []
     for s in current_user.memory_sets:
         formatted_sets.append(schemas.MemorySetResponse(
@@ -193,11 +223,12 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
             words=json.loads(s.words_json) if s.words_json else [],
             owner_id=s.owner_id,
             memorize_time=s.memorize_time,
-            answer_time=s.answer_time, # ★追加: 回答制限時間をレスポンスに含める
+            answer_time=s.answer_time,
             questions_per_round=s.questions_per_round,
             win_score=s.win_score,
             condition_type=s.condition_type,
-            order_type=s.order_type
+            order_type=s.order_type,
+            is_official=s.is_official
         ))
     return schemas.UserResponse(
         id=current_user.id,
@@ -205,9 +236,7 @@ def read_users_me(current_user: models.User = Depends(get_current_user)):
         memory_sets=formatted_sets
     )
 
-# ★メモリーセット関連（my-sets, sets）のAPIは routers/memory_sets.py に移動しました
-
-# 問題取得 API (ゲームロジック依存のためmainに残存)
+# ★修正：問題取得ロジック（Step 4対応版）
 @app.get("/api/problem")
 def get_problem(
     room_id: Optional[str] = None, 
@@ -217,33 +246,48 @@ def get_problem(
     current_index: int = 0,
     db: Session = Depends(get_db)
 ):
-    target_set_id = "default"
+    # 1. ルームまたはクエリからIDを特定
+    target_id = None
     if room_id and room_id in active_rooms:
-        target_set_id = active_rooms[room_id].memorySetId
-    elif set_id:
-        target_set_id = set_id
-    
-    order_type = "random"
-    target_problems = DEFAULT_MEMORY_SETS["default"]
-
-    # 1. デフォルトセットから探す
-    if target_set_id in DEFAULT_MEMORY_SETS:
-        target_problems = DEFAULT_MEMORY_SETS[target_set_id]
+        target_id = active_rooms[room_id].memorySetId
     else:
-        # 2. DBから探す
-        if str(target_set_id).isdigit():
-            db_id = int(target_set_id)
-            db_set = db.query(models.MemorySet).filter(models.MemorySet.id == db_id).first()
-            if db_set:
-                order_type = db_set.order_type
-                try:
-                    loaded_words = json.loads(db_set.words_json)
-                    if loaded_words: target_problems = loaded_words
-                except: pass
+        target_id = set_id or "default"
 
+    target_problems = None
+    order_type = "random"
+
+    # 2. 数値ID（DB上のカスタムセット）の検索
+    if str(target_id).isdigit():
+        db_set = db.query(models.MemorySet).filter(models.MemorySet.id == int(target_id)).first()
+        if db_set:
+            try:
+                target_problems = json.loads(db_set.words_json)
+                order_type = db_set.order_type
+            except: pass
+
+    # 3. 文字列キー（"default"等）の場合、DB内の公式セットを優先検索
+    if not target_problems and target_id in OFFICIAL_TITLE_MAP:
+        title = OFFICIAL_TITLE_MAP[target_id]
+        db_set = db.query(models.MemorySet).filter(
+            models.MemorySet.title == title,
+            models.MemorySet.is_official == True
+        ).first()
+        if db_set:
+            try:
+                target_problems = json.loads(db_set.words_json)
+                order_type = db_set.order_type
+            except: pass
+
+    # 4. 定数（DEFAULT_MEMORY_SETS）からの直接取得（DB未登録時のバックアップ）
+    if not target_problems and target_id in DEFAULT_MEMORY_SETS:
+        target_problems = DEFAULT_MEMORY_SETS[target_id]
+
+    # 5. 最終フォールバック
     if not target_problems:
+        print(f"Set '{target_id}' not found. Falling back.")
         target_problems = DEFAULT_MEMORY_SETS["default"]
 
+    # 問題生成
     effective_seed = seed
     if effective_seed is None and room_id and room_id in active_rooms:
         effective_seed = active_rooms[room_id].seed
@@ -260,7 +304,6 @@ def get_problem(
             weighted_pool.extend([p] * weight)
         correct = rng.choice(weighted_pool)
     else:
-        # random
         correct = rng.choice(target_problems)
     
     others = [p for p in target_problems if p["text"] != correct["text"]]
@@ -280,26 +323,43 @@ def get_rooms():
     return list(active_rooms.values())
 
 @app.post("/api/rooms")
-def create_room(req: CreateRoomRequest, db: Session = Depends(get_db)):
+def create_room(
+    req: CreateRoomRequest, 
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     if req.name in active_rooms:
         raise HTTPException(status_code=400, detail="そのルーム名は既に使用されています")
     
-    mem_time, ans_time, q_per_round = 3, 10, 1 # ★ans_timeを追加
-    cond_type, win_score = req.conditionType, req.winScore
+    mem_time, ans_time, q_per_round = 3, 10, 1
+    
+    # セット情報の特定
+    target_set = None
+    if req.memorySetId.isdigit():
+        target_set = db.query(models.MemorySet).filter(
+            models.MemorySet.id == int(req.memorySetId)
+        ).filter(
+            or_(models.MemorySet.is_official == True, models.MemorySet.owner_id == current_user.id)
+        ).first()
+    elif req.memorySetId in OFFICIAL_TITLE_MAP:
+        target_set = db.query(models.MemorySet).filter(
+            models.MemorySet.title == OFFICIAL_TITLE_MAP[req.memorySetId],
+            models.MemorySet.is_official == True
+        ).first()
 
-    if req.memorySetId != "default" and req.memorySetId.isdigit():
-        db_set = db.query(models.MemorySet).filter(models.MemorySet.id == int(req.memorySetId)).first()
-        if db_set:
-            mem_time = db_set.memorize_time
-            ans_time = db_set.answer_time # ★メモリーセットから回答制限時間を取得
-            q_per_round = db_set.questions_per_round
+    if target_set:
+        mem_time = target_set.memorize_time
+        ans_time = target_set.answer_time
+        q_per_round = target_set.questions_per_round
+    elif req.memorySetId.isdigit():
+        raise HTTPException(status_code=403, detail="権限がありません")
 
     new_room = RoomInfo(
         id=req.name, name=req.name, hostName=req.hostName,
-        isLocked=req.password != "", winScore=win_score,
+        isLocked=req.password != "", winScore=req.winScore,
         memorySetId=req.memorySetId, memorizeTime=mem_time,
-        answerTime=ans_time, # ★ルーム情報に適用
-        questionsPerRound=q_per_round, conditionType=cond_type
+        answerTime=ans_time,
+        questionsPerRound=q_per_round, conditionType=req.conditionType
     )
     
     active_rooms[req.name] = new_room
@@ -311,7 +371,7 @@ def create_room(req: CreateRoomRequest, db: Session = Depends(get_db)):
     return {"message": "Room created", "room": new_room, "ownerToken": owner_token}
 
 @app.delete("/api/rooms/{room_id}")
-def delete_room(room_id: str, token: Optional[str] = None):
+def delete_room(room_id: str, token: Optional[str] = None, current_user: models.User = Depends(get_current_user)):
     if room_id not in active_rooms:
         raise HTTPException(status_code=404, detail="ルームが見つかりません")
     
@@ -331,15 +391,10 @@ def verify_room_password(req: VerifyPasswordRequest):
         return {"message": "OK"}
     raise HTTPException(status_code=401, detail="パスワードが違います")
 
-# ==========================
-#  WebSocket 補助関数
-# ==========================
-
 async def delayed_room_cleanup(room_id: str):
     try:
         await asyncio.sleep(5)
         if room_id in active_rooms and active_rooms[room_id].playerCount <= 0:
-            print(f"Cleaning up empty room after grace period: {room_id}")
             for d in [active_rooms, room_passwords, room_owner_tokens, room_clients]:
                 d.pop(room_id, None)
             manager.active_connections.pop(room_id, None)
@@ -348,25 +403,24 @@ async def delayed_room_cleanup(room_id: str):
     finally:
         manager.cleanup_tasks.pop(room_id, None)
 
-# ==========================
-#  WebSocket
-# ==========================
-
+@app.websocket("/ws/battle/{room_id}/{player_id}")
 @app.websocket("/ws/{room_id}/{player_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str):
+async def websocket_endpoint(
+    websocket: WebSocket, 
+    room_id: str, 
+    player_id: str,
+    setName: Optional[str] = None
+):
     await websocket.accept()
-
     if room_id not in active_rooms:
         await websocket.close(code=4000)
         return
-
     await manager.connect(websocket, room_id)
-    
     if room_id not in room_clients: 
         room_clients[room_id] = set()
     room_clients[room_id].add(player_id)
     active_rooms[room_id].playerCount = len(room_clients[room_id])
-
+    
     try:
         if active_rooms[room_id].playerCount == 2:
             active_rooms[room_id].status = "playing"
@@ -375,40 +429,30 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str)
         
         while True:
             data = await websocket.receive_text()
-            
             if data.endswith(":MATCHED"):
                 active_rooms[room_id].seed = str(uuid.uuid4())
                 active_rooms[room_id].status = "playing"
-                
             await manager.broadcast(data, room_id)
             
     except (WebSocketDisconnect, Exception) as e:
         print(f"WS Disconnect or Error ({player_id}): {e}")
     finally:
         manager.disconnect(websocket, room_id)
-        
         if room_id in room_clients:
             room_clients[room_id].discard(player_id)
-            
             if room_id in active_rooms:
                 count = len(room_clients[room_id])
                 active_rooms[room_id].playerCount = count
-                
                 if count == 1:
                     active_rooms[room_id].status = "waiting"
-                
                 if count <= 0:
                     task = asyncio.create_task(delayed_room_cleanup(room_id))
                     manager.cleanup_tasks[room_id] = task
 
 # フロントエンド配信
 frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
-
 if os.path.exists(frontend_path):
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
-    
     @app.exception_handler(404)
     async def not_found_exception_handler(request, exc):
         return FileResponse(os.path.join(frontend_path, "index.html"))
-else:
-    print(f"Warning: frontend_path not found at {frontend_path}")

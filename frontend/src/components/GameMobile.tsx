@@ -4,7 +4,6 @@ import type { GameSettings, Problem } from '../types';
 import { useSound } from '../hooks/useSound';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 type ApiResponse = {
   correct: Problem;
@@ -39,18 +38,10 @@ function GameMobile({
   const { playSE } = useSound();
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
-  const ANSWER_TIME = settings?.answerTime || 10; // ★回答時間を設定から取得
+  const ANSWER_TIME = settings?.answerTime || 10;
 
-  useEffect(() => {
-    if (isSoloMode || !roomId || !playerId) return;
-
-    const wsUrl = `${WS_BASE}/ws/battle/${roomId}/${playerId}?setName=${setId}`;
-    const socket = new WebSocket(wsUrl);
-
-    return () => {
-      socket.close();
-    };
-  }, [roomId, playerId, setId, isSoloMode]);
+  // ★修正: 二重接続を防ぐため、子コンポーネント内での WebSocket 作成を削除しました。
+  // 通信は親の BattleMode.tsx が一括して行います。
 
   const [gameState, setGameState] = useState<GameState>('loading');
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -58,11 +49,11 @@ function GameMobile({
   const [choices, setChoices] = useState<ChoiceItem[]>([]);
   const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
-  const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME); // ★回答タイマー用State
+  const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME);
   const [overlayMark, setOverlayMark] = useState<boolean | null>(null);
   
   const latestRequestId = useRef(0);
-  const isProcessing = useRef(false); // ★多重処理防止用
+  const isProcessing = useRef(false);
 
   const totalAttemptedRef = useRef(totalAttempted);
   const wrongHistoryRef = useRef(wrongHistory);
@@ -72,7 +63,7 @@ function GameMobile({
   const loadProblem = useCallback(async () => {
       const requestId = latestRequestId.current + 1;
       latestRequestId.current = requestId;
-      isProcessing.current = false; // ★フラグリセット
+      isProcessing.current = false;
 
       setGameState('loading');
       setOverlayMark(null);
@@ -81,7 +72,7 @@ function GameMobile({
       setChoices([]);
       setSelectedChoiceId(null);
       setTimeLeft(MEMORIZE_TIME);
-      setAnswerTimeLeft(ANSWER_TIME); // ★回答タイマーリセット
+      setAnswerTimeLeft(ANSWER_TIME);
 
       try {
           const newProblems: Problem[] = [];
@@ -134,7 +125,6 @@ function GameMobile({
     if (resetKey >= 0) loadProblem(); 
   }, [resetKey, loadProblem]);
 
-  // 暗記タイマーの制御
   useEffect(() => {
     if (gameState === 'memorize') {
         if (timeLeft > 0) {
@@ -146,20 +136,17 @@ function GameMobile({
     }
   }, [gameState, timeLeft]);
 
-  // ★回答タイマーの制御
   useEffect(() => {
     if (gameState === 'quiz' && !isProcessing.current) {
         if (answerTimeLeft > 0) {
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            // 時間切れ：強制的に不正解判定を実行
             handleForceWrong();
         }
     }
   }, [gameState, answerTimeLeft]);
 
-  // ★時間切れ時の強制不正解処理
   const handleForceWrong = () => {
     if (isProcessing.current || gameState === 'waiting') return;
     isProcessing.current = true;
@@ -225,14 +212,12 @@ function GameMobile({
   return (
     <div className="relative p-2 bg-orange-50 h-full flex flex-col items-center w-full overflow-hidden">
       
-      {/* Loading中の表示 */}
       {gameState === 'loading' && (
         <div className="flex-1 flex items-center justify-center w-full h-full">
             <div className="text-xl font-black text-[#8d6e63] animate-pulse">Loading...</div>
         </div>
       )}
 
-      {/* 暗記フェーズのタイマーバー */}
       {gameState === 'memorize' && (
         <div className="w-full h-2 bg-gray-300 rounded-full mb-2 shrink-0 overflow-hidden relative">
           <style>{`@keyframes shrink-mobile { from { width: 100%; } to { width: 0%; } }`}</style>
@@ -244,7 +229,6 @@ function GameMobile({
         </div>
       )}
 
-      {/* ★回答フェーズのタイマーバー（滑らかに減るアニメーション） */}
       {gameState === 'quiz' && (
         <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
           <style>{`@keyframes shrink-answer-bar { from { width: 100%; } to { width: 0%; } }`}</style>

@@ -48,13 +48,14 @@ function BattleMode() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // ★修正: ロビーから渡された state を確実に受け取る
   const { 
       roomId = "room1", 
       playerName = "Guest",
       playerId = `Guest_${Math.random()}`, 
       isHost = false,
       settings = DEFAULT_SETTINGS,
-      memorySetId
+      memorySetId // これが自作セットの数値IDまたは公式キー
   } = location.state || {};
 
   const WINNING_SCORE = settings.clearConditionValue || 10;
@@ -108,7 +109,11 @@ function BattleMode() {
     const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
     const WS_BASE = API_BASE.replace(/^http/, 'ws');
     
-    const ws = new WebSocket(`${WS_BASE}/ws/${roomId}/${playerId}`);
+    // ★修正: バックエンドの Step 2 で追加した新しいパスを使用し、
+    // クエリパラメータとして memorySetId を明示的に渡すようにしました。
+    const setParam = memorySetId ? `?setName=${memorySetId}` : "";
+    const ws = new WebSocket(`${WS_BASE}/ws/battle/${roomId}/${playerId}${setParam}`);
+    
     socketRef.current = ws;
     
     ws.onopen = () => {
@@ -213,7 +218,6 @@ function BattleMode() {
         return () => clearInterval(interval);
     }
   }, [gameStatus]);
-
 
   const checkBattleFinish = (isWin: boolean) => {
     if (isWin) {
@@ -327,7 +331,6 @@ function BattleMode() {
     return 'E';
   };
 
-
   const getMemoryRank = (score: number, miss: number) => {
       if (score === 0 && miss === 0) return '-';
       if (miss === 0) return 'S';
@@ -408,12 +411,10 @@ function BattleMode() {
                             </div>
                         )}
 
-                        {/* ★修正: shrink-0を削除し、flex-1とmin-w-0を追加して縮小可能に */}
                         <div className="flex flex-col items-center justify-center flex-1 min-w-0">
                             <div className={`
                                 overflow-hidden animate-pop-in relative
                                 ${isMobile ? 'w-[90vw] h-[70vh] min-h-[550px] mt-4 bg-[#fff8e1] rounded-3xl border-4 border-[#d4a373] shadow-xl flex flex-col' 
-                                           // ★修正: w-[95vw] を w-full に変更
                                            : 'bg-white/90 rounded-3xl shadow-2xl border-8 border-[#d4a373] w-full max-w-5xl h-[70vh] min-h-[500px]'}
                             `}>
                                 {isMobile ? (
@@ -422,8 +423,8 @@ function BattleMode() {
                                       onWrong={sendMiss} 
                                       resetKey={roundNumber}
                                       roomId={roomId}
-                                      playerId={playerName}
-                                      setId={memorySetId}
+                                      playerId={playerId} // ★playerIdを使用
+                                      setId={memorySetId} // ★ここが重要
                                       seed={`${roomId}-${roundNumber}`} 
                                       settings={settings}
                                       wrongHistory={missedProblems.map(p => p.text)}
@@ -436,8 +437,8 @@ function BattleMode() {
                                         onTypo={handleTypo} 
                                         resetKey={roundNumber}
                                         roomId={roomId}
-                                        playerId={playerName}
-                                        setId={memorySetId}
+                                        playerId={playerId} // ★playerIdを使用
+                                        setId={memorySetId} // ★ここが重要
                                         settings={settings}
                                         seed={`${roomId}-${roundNumber}`}
                                         wrongHistory={missedProblems.map(p => p.text)}

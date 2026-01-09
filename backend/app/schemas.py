@@ -17,13 +17,14 @@ class MemorySetBase(BaseModel):
     win_score: int = 10
     condition_type: str = "score"
     order_type: str = "random"
+    is_official: bool = False # ★Step 1: 追加
 
 class MemorySetCreate(MemorySetBase):
     pass
 
 class MemorySetResponse(MemorySetBase):
     id: int
-    owner_id: int
+    owner_id: Optional[int] = None # 公式は Null の可能性があるため Optional に変更
     
     class Config:
         from_attributes = True

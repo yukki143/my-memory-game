@@ -1,5 +1,5 @@
 # backend/app/models.py
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Float, Boolean
 from sqlalchemy.orm import relationship
 from .database import Base
 from sqlalchemy.dialects.postgresql import JSONB
@@ -33,7 +33,10 @@ class MemorySet(Base):
     # 出題順序 (random: ランダム / review: 苦手優先 / sequential: 順番)
     order_type = Column(String, default="random") 
 
-    owner_id = Column(Integer, ForeignKey("users.id"))
+    # ★Step 1: 公式セット判定フラグ
+    is_official = Column(Boolean, default=False)
+
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=True) # 公式セットは owner_id が Null を許容
     owner = relationship("User", back_populates="memory_sets")
 
 # ★追加: ランキングテーブル

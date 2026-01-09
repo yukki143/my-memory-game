@@ -7,7 +7,6 @@ import { authFetch } from '../utils/auth';
 // APIの場所 (環境に合わせて変更してください)
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-
 type MemorySetOption = {
   id: string;
   name: string;
@@ -69,7 +68,7 @@ export default function BattleLobby() {
 
   const fetchRooms = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/rooms`);
+      const res = await authFetch("/api/rooms");
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
@@ -83,19 +82,23 @@ export default function BattleLobby() {
     }
   };
 
+  // ★修正：初期値のフォールバックを防ぐための初期選択ロジック
   const fetchMemorySets = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/sets`);
+      const res = await authFetch("/api/sets");
       if (res.ok) {
         const data = await res.json();
         setMemorySets(data);
+        // リストが存在し、かつ現在が "default" のままなら、最初のセットを選択状態にする
+        if (data.length > 0 && (selectedSetId === "default" || !selectedSetId)) {
+          setSelectedSetId(data[0].id);
+        }
       }
     } catch (e) {
       console.error("Sets fetch error:", e);
     }
   };
 
-  // ★修正: ルーム削除処理 (空の部屋ならトークンなしでも削除可能にする)
   const handleDeleteRoom = async (roomId: string, isGhost: boolean) => {
     const confirmMsg = isGhost 
       ? `誰もいないルーム「${roomId}」を掃除しますか？`
@@ -103,15 +106,14 @@ export default function BattleLobby() {
 
     if (!window.confirm(confirmMsg)) return;
 
-    // トークンを取得 (持っていれば送る)
-    const token = localStorage.getItem(`room_token_${roomId}`);
+    const roomToken = localStorage.getItem(`room_token_${roomId}`);
 
     try {
-      const url = token 
-        ? `${API_BASE}/api/rooms/${roomId}?token=${token}`
-        : `${API_BASE}/api/rooms/${roomId}`;
+      const path = roomToken 
+        ? `/api/rooms/${roomId}?token=${roomToken}`
+        : `/api/rooms/${roomId}`;
 
-      const res = await fetch(url, { method: "DELETE" });
+      const res = await authFetch(path, { method: "DELETE" });
 
       if (res.ok) {
         alert(isGhost ? "掃除しました 🧹" : "ルームを削除しました");
@@ -142,7 +144,7 @@ export default function BattleLobby() {
     };
     
     try {
-      const res = await fetch(`${API_BASE}/api/rooms`, {
+      const res = await authFetch("/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody)
@@ -156,27 +158,27 @@ export default function BattleLobby() {
       }
 
       const data = await res.json();
+      const roomInfo = data.room;
       
       if (data.ownerToken) {
-          localStorage.setItem(`room_token_${newRoomName}`, data.ownerToken);
+          localStorage.setItem(`room_token_${roomInfo.id}`, data.ownerToken);
           loadOwnedRooms();
       }
 
-      const roomInfo = data.room;
-
       navigate('/battle', { 
         state: { 
-          roomId: newRoomName, 
+          roomId: roomInfo.id, 
           playerName, 
           playerId: generatePlayerId(playerName),
           isHost: true,
           settings: { 
              memorizeTime: roomInfo.memorizeTime,
+             answerTime: roomInfo.answerTime,
              questionsPerRound: roomInfo.questionsPerRound,
-             clearConditionValue: winCondition,
+             clearConditionValue: roomInfo.winScore,
              conditionType: roomInfo.conditionType
           },
-          memorySetId: selectedSetId
+          memorySetId: roomInfo.memorySetId 
         } 
       });
 
@@ -192,7 +194,8 @@ export default function BattleLobby() {
       if (pass === null) return;
       
       try {
-        const res = await fetch(`${API_BASE}/api/rooms/verify`, {
+        const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+        const res = await fetch(`${API_URL}/api/rooms/verify`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ roomId: room.id, password: pass })
@@ -207,20 +210,19 @@ export default function BattleLobby() {
       }
     }
 
-    const settings = {
-        memorizeTime: room.memorizeTime,
-        questionsPerRound: room.questionsPerRound,
-        clearConditionValue: room.winScore,
-        conditionType: room.conditionType
-    };
-
     navigate('/battle', {
       state: { 
           roomId: room.id, 
           playerName, 
           playerId: generatePlayerId(playerName),
           isHost: false,
-          settings: settings,
+          settings: {
+            memorizeTime: room.memorizeTime,
+            answerTime: room.answerTime,
+            questionsPerRound: room.questionsPerRound,
+            clearConditionValue: room.winScore,
+            conditionType: room.conditionType
+          },
           memorySetId: room.memorySetId
       }
     });
@@ -288,7 +290,6 @@ export default function BattleLobby() {
                                         {room.isLocked && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded">🔑</span>}
                                     </h3>
                                     
-                                    {/* ★修正: 所有しているルーム、または参加人数が0人のルームに削除ボタンを表示 */}
                                     {(myOwnedRooms.includes(room.id) || room.playerCount === 0) && (
                                         <button 
                                             onClick={() => handleDeleteRoom(room.id, room.playerCount === 0)}
@@ -329,7 +330,6 @@ export default function BattleLobby() {
         </div>
       </div>
 
-      {/* モーダル (変更なし) */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
             <div className="theme-white-wood-card p-6 w-full max-w-md animate-pop-in relative">

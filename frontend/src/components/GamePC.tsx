@@ -3,8 +3,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { Problem } from '../types';
 import type { GameSettings } from '../types';
 import { useSound } from '../hooks/useSound';
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 type GamePCProps = {
   onScore?: () => void;
@@ -31,18 +31,8 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
   const ANSWER_TIME = settings?.answerTime || 10;
 
-  // --- useEffectの中の接続処理 ---
-  useEffect(() => {
-    if (!roomId || !playerId) return;
-
-    // ★ ここで WS_BASE を使って URL を組み立てる
-    const wsUrl = `${WS_BASE}/ws/battle/${roomId}/${playerId}?setName=${setId}`;
-    
-    console.log("Connecting to:", wsUrl); // 確認用
-    const socket = new WebSocket(wsUrl);
-
-    // ... 以下の処理はそのまま
-  }, [roomId, playerId, setId]);
+  // ★修正: 二重接続を防ぐため、子コンポーネント内での WebSocket 作成を削除しました。
+  // 通信は親の BattleMode.tsx が一括して行います。
 
   const [gameState, setGameState] = useState<'memorize' | 'answer' | 'waiting'>('memorize');
   const [problems, setProblems] = useState<Problem[]>([]);
@@ -58,29 +48,33 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
   const isComposing = useRef(false);
   const { playSE } = useSound();
   
-  // ★追加: 最新の統計データを保持するRef（再ロードのトリガーにしないため）
   const totalAttemptedRef = useRef(totalAttempted);
   const wrongHistoryRef = useRef(wrongHistory);
 
-  // Propsが更新されたらRefを最新にする
   useEffect(() => { totalAttemptedRef.current = totalAttempted; }, [totalAttempted]);
   useEffect(() => { wrongHistoryRef.current = wrongHistory; }, [wrongHistory]);
 
   const inputRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
   const [showWrongMark, setShowWrongMark] = useState(false);
 
-  // --- 問題ロード ---
+  useEffect(() => {
+    if (gameState === 'answer') {
+      const firstInput = inputRefs.current[0];
+      if (firstInput) {
+        firstInput.focus();
+      }
+    }
+  }, [gameState, resetKey]);
+
   const loadProblem = useCallback(async () => {
     isProcessing.current = false;
     const requestId = latestRequestId.current + 1;
     latestRequestId.current = requestId;
 
-    // 演出リセット
     setResults(Array(splitCount).fill(null));
     setShowWrongMark(false);
     setIsError(false);
     
-    // 状態初期化
     setProblems([]);
     setInputVals(Array(splitCount).fill(""));
     setTimeLeft(MEMORIZE_TIME);
@@ -95,7 +89,6 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
             if (setId) params.append("set_id", setId);
             if (seed) params.append("seed", `${seed}-${i}`);
             
-            // ★Refから最新値を取得して送信
             if (wrongHistoryRef.current && wrongHistoryRef.current.length > 0) {
                 params.append("wrong_history", wrongHistoryRef.current.join(","));
             }
@@ -118,7 +111,6 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
         console.error(e);
         isProcessing.current = false;
     }
-    // ★依存配列から totalAttempted と wrongHistory を削除
   }, [splitCount, roomId, setId, seed, MEMORIZE_TIME, ANSWER_TIME]);
 
   useEffect(() => { 
@@ -136,14 +128,12 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
     }
   }, [gameState, timeLeft]);
 
-  // ★追加: 解答フェーズのカウントダウンロジック
   useEffect(() => {
     if (gameState === 'answer' && !isProcessing.current) {
         if (answerTimeLeft > 0) {
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            // 0秒になったら自動でEnterキー処理（判定）を実行
             handleEnterKey();
         }
     }
@@ -169,18 +159,10 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
 
   const handleAllCorrect = () => {
       if (isProcessing.current || gameState === 'waiting') return; 
-
-      // 1. まず音を鳴らす（最優先）
       playSE('/sounds/se_correct.mp3');
-
-      // 2. 次に〇を表示する
       setResults(Array(splitCount).fill(true));
-      
-      // 3. 状態を更新
       isProcessing.current = true;
       setGameState('waiting');
-      
-      // 4. 親への報告（重い処理）は最後に行う
       if (onScore) onScore();
   };
 
@@ -191,18 +173,11 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
       if (isAllCorrect) {
           handleAllCorrect();
       } else {
-          // 1. まず音を鳴らす
           playSE('/sounds/se_wrong.mp3');
-
-          // 2. 次に✕を表示
           setShowWrongMark(true);
           triggerErrorEffect();
-
-          // 3. 状態更新
           setGameState('waiting');
           isProcessing.current = true;
-          
-          // 4. 親への報告は最後
           if (onWrong && problems[0]) onWrong(problems[0]);
       }
   };
@@ -226,13 +201,21 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
         newVals[index] = val;
         setInputVals(newVals);
         setIsError(false);
-        const isAllCorrect = problems.every((p, i) => 
-            (i === index ? val : newVals[i]) === p.text
-        );
-        if (isAllCorrect) handleAllCorrect();
+
+        const isCurrentDone = val === targetProblem.text;
+        const isAllCorrect = problems.every((p, i) => (i === index ? val : newVals[i]) === p.text);
+
+        if (isAllCorrect) {
+          handleAllCorrect();
+        } else if (isCurrentDone) {
+          const nextInput = inputRefs.current[index + 1];
+          if (nextInput) {
+            nextInput.focus();
+          }
+        }
     } else {
         triggerErrorEffect();
-        playSE('/sounds/se_typo.mp3'); // ★即座にタイポ音を鳴らす
+        playSE('/sounds/se_typo.mp3');
         if (onTypo && targetProblem) {
             const expected = targetProblem.text.charAt(newVals[index].length);
             onTypo(expected);
@@ -249,77 +232,52 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
           75% { transform: translateX(5px); }
         }
         .animate-shake { animation: shake 0.2s ease-in-out 2; }
+        @keyframes shrink-answer-bar { from { width: 100%; } to { width: 0%; } }
       `}</style>
 
-      <style>{`
-        @keyframes shrink-answer-bar {
-          from { width: 100%; }
-          to { width: 0%; }
-        }
-      `}</style>
-
-      {/* 〇表示 */}
       {results.every(r => r === true) && results.length > 0 && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
               <div className="text-9xl font-black text-green-500 drop-shadow-2xl animate-bounce-in">〇</div>
           </div>
       )}
 
-      {/* ✕表示 */}
       {showWrongMark && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
               <div className="text-9xl font-black text-red-600 drop-shadow-2xl animate-bounce-in">✕</div>
           </div>
       )}
 
-      {/* 暗記フェーズ */}
       {gameState === 'memorize' && problems.length > 0 && (
         <div className="flex flex-col w-full h-full">
             <div className="w-full h-2 bg-gray-300 rounded-full mb-2 overflow-hidden relative">
-                <style>{`
-                  @keyframes shrink-width { from { width: 100%; } to { width: 0%; } }
-                `}</style>
+                <style>{`@keyframes shrink-width { from { width: 100%; } to { width: 0%; } }`}</style>
                 <div 
                     key={resetKey}
                     className="h-full bg-orange-500"
-                    style={{
-                        width: '100%',
-                        animation: `shrink-width ${MEMORIZE_TIME}s linear forwards`
-                    }}
+                    style={{ animation: `shrink-width ${MEMORIZE_TIME}s linear forwards` }}
                 />
             </div>
             <div className={`grid gap-6 w-full h-full items-center justify-center ${getGridClass()}`}>
                 {problems.map((p, idx) => (
                     <div key={idx} className="flex flex-col items-center justify-center bg-white/80 p-6 rounded-2xl shadow-md border-4 border-[#d7ccc8] animate-pulse">
-                        <div className={`font-black text-[#5d4037] mb-2 text-center ${getFontSize(p.text)}`}>
-                            {p.text}
-                        </div>
-                        <div className="text-xl md:text-2xl font-bold text-gray-500 text-center">
-                            {p.kana || "　"}
-                        </div>
+                        <div className={`font-black text-[#5d4037] mb-2 text-center ${getFontSize(p.text)}`}>{p.text}</div>
+                        <div className="text-xl md:text-2xl font-bold text-gray-500 text-center">{p.kana || "　"}</div>
                     </div>
                 ))}
             </div>
         </div>
       )}
 
-      {/* ★修正: 解答フェーズ中の残り時間バー */}
       {gameState === 'answer' && (
         <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
           <div 
-            /* key に resetKey を含めることで、次の問題に進むたびにアニメーションがリセットされます */
             key={`answer-bar-${resetKey}`}
             className="h-full bg-red-500"
-            style={{ 
-                width: '100%',
-                /* CSSアニメーションで滑らかに動かす（ANSWER_TIME秒かけて0%へ） */
-                animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` 
-            }}
+            style={{ animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` }}
           />
         </div>
       )}
 
-      {/* 回答フェーズ */}
       {(gameState === 'answer' || gameState === 'waiting') && (
         <div className={`grid gap-6 w-full h-full p-4 relative z-10 ${getGridClass()}`}>
            {problems.map((p, idx) => (
