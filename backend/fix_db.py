@@ -4,22 +4,31 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from app.database import engine
 
-# .envファイルを明示的に読み込む
 load_dotenv()
 
 def migrate():
-    print(f"Connecting to: {engine.url}")
+    print(f"Connecting to database to migrate...")
     try:
         with engine.connect() as conn:
-            # カラムを追加するSQL
-            conn.execute(text("ALTER TABLE memory_sets ADD COLUMN is_official BOOLEAN DEFAULT FALSE;"))
-            conn.commit()
-            print("✅ Successfully added 'is_official' column to 'memory_sets' table.")
+            # is_official カラムの追加
+            try:
+                conn.execute(text("ALTER TABLE memory_sets ADD COLUMN is_official BOOLEAN DEFAULT FALSE;"))
+                conn.commit()
+                print("✅ Added 'is_official' column.")
+            except Exception as e:
+                print(f"ℹ️ 'is_official' column check: {e}")
+
+            # answer_time カラムの追加
+            try:
+                conn.execute(text("ALTER TABLE memory_sets ADD COLUMN answer_time INTEGER DEFAULT 10;"))
+                conn.commit()
+                print("✅ Added 'answer_time' column.")
+            except Exception as e:
+                print(f"ℹ️ 'answer_time' column check: {e}")
+
+            print("🎉 Migration completed successfully.")
     except Exception as e:
-        if "already exists" in str(e):
-            print("ℹ️ Column 'is_official' already exists. Skipping.")
-        else:
-            print(f"❌ Error: {e}")
+        print(f"❌ Migration failed: {e}")
 
 if __name__ == "__main__":
     migrate()
