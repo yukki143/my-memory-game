@@ -12,7 +12,7 @@ router = APIRouter(
     tags=["memory-sets"]
 )
 
-# 【重要】ルーム作成時の選択用。他人のセットは絶対に出さない。
+# ルーム作成時の選択用リスト取得
 @router.get("/sets")
 def get_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     # 公式セット または 自分が作成したセット のみ取得
@@ -25,7 +25,7 @@ def get_memory_sets(current_user: models.User = Depends(get_current_user), db: S
     
     return [{"id": str(s.id), "name": s.title} for s in db_sets]
 
-# --- 以下、CRUDエンドポイント ---
+# 自分のメモリーセット一覧取得
 @router.get("/my-sets", response_model=List[schemas.MemorySetResponse])
 def read_my_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sets = db.query(models.MemorySet).filter(models.MemorySet.owner_id == current_user.id).all()
@@ -41,14 +41,22 @@ def read_my_memory_sets(current_user: models.User = Depends(get_current_user), d
         })
     return results
 
+# 新規作成 (POST)
 @router.post("/my-sets", response_model=schemas.MemorySetResponse)
 def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 単語リストをJSON文字列に変換
     words_json_str = json.dumps([w.dict() for w in item.words], ensure_ascii=False)
+    
     new_set = models.MemorySet(
-        title=item.title, words_json=words_json_str, owner_id=current_user.id,
-        memorize_time=item.memorize_time, answer_time=item.answer_time,
-        questions_per_round=item.questions_per_round, win_score=item.win_score,
-        condition_type=item.condition_type, order_type=item.order_type,
+        title=item.title, 
+        words_json=words_json_str, 
+        owner_id=current_user.id,
+        memorize_time=item.memorize_time, 
+        answer_time=item.answer_time,
+        questions_per_round=item.questions_per_round, 
+        win_score=item.win_score,
+        condition_type=item.condition_type, 
+        order_type=item.order_type,
         is_official=False
     )
     db.add(new_set)
@@ -56,6 +64,7 @@ def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User =
     db.refresh(new_set)
     return {**new_set.__dict__, "words": json.loads(new_set.words_json)}
 
+# 単一取得 (GET)
 @router.get("/my-sets/{set_id}", response_model=schemas.MemorySetResponse)
 def read_single_memory_set(set_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     memory_set = db.query(models.MemorySet).filter(
@@ -69,11 +78,50 @@ def read_single_memory_set(set_id: int, current_user: models.User = Depends(get_
     
     return {**memory_set.__dict__, "words": json.loads(memory_set.words_json)}
 
+# ★追加: 更新処理 (PUT)
+@router.put("/my-sets/{set_id}", response_model=schemas.MemorySetResponse)
+def update_memory_set(
+    set_id: int, 
+    item: schemas.MemorySetCreate, 
+    current_user: models.User = Depends(get_current_user), 
+    db: Session = Depends(get_db)
+):
+    # 更新対象を検索（自分の所有物であることを確認）
+    db_set = db.query(models.MemorySet).filter(
+        models.MemorySet.id == set_id, 
+        models.MemorySet.owner_id == current_user.id
+    ).first()
+
+    if not db_set:
+        raise HTTPException(status_code=404, detail="Set not found or access denied")
+
+    # フィールドの更新
+    db_set.title = item.title
+    db_set.words_json = json.dumps([w.dict() for w in item.words], ensure_ascii=False)
+    db_set.memorize_time = item.memorize_time
+    db_set.answer_time = item.answer_time
+    db_set.questions_per_round = item.questions_per_round
+    db_set.win_score = item.win_score
+    db_set.condition_type = item.condition_type
+    db_set.order_type = item.order_type
+
+    db.commit()
+    db.refresh(db_set)
+
+    # 辞書形式で展開し、words_jsonをパースして返却
+    return {**db_set.__dict__, "words": json.loads(db_set.words_json)}
+
+# 削除 (DELETE)
 @router.delete("/my-sets/{set_id}")
 def delete_memory_set(set_id: int, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    memory_set = db.query(models.MemorySet).filter(models.MemorySet.id == set_id, models.MemorySet.owner_id == current_user.id).first()
+    memory_set = db.query(models.MemorySet).filter(
+        models.MemorySet.id == set_id, 
+        models.MemorySet.owner_id == current_user.id
+    ).first()
+    
     if not memory_set:
         raise HTTPException(status_code=404, detail="Set not found")
+    
     db.delete(memory_set)
     db.commit()
     return {"message": "Set deleted successfully"}

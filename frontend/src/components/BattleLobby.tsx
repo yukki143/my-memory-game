@@ -132,10 +132,17 @@ export default function BattleLobby() {
   const handleCreateRoom = async () => {
     if (!newRoomName.trim()) return alert("ルーム名を入力してください");
 
+    const normalizedName = newRoomName.replace(/[！-～]/g, (s) => 
+      String.fromCharCode(s.charCodeAt(0) - 0xFEE0)
+    ).trim();
+
+    if (!normalizedName) return alert("有効なルーム名を入力してください");
+    if (normalizedName.length < 1) return alert("ルーム名が短すぎます");
+
     setIsLoading(true);
 
     const requestBody = {
-      name: newRoomName,
+      name: normalizedName,
       hostName: playerName,
       password: newRoomPass,
       winScore: winCondition,
