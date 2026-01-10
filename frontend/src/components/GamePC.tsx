@@ -156,13 +156,17 @@ export default function GamePC({
   const handleInputChange = (index: number, val: string) => {
     if (gameState === 'waiting' || isProcessing.current || isLocked) return;
     const newVals = [...inputVals];
+
+    // 文字を消した場合は許可する
     if (val.length < newVals[index].length) {
         newVals[index] = val;
         setInputVals(newVals);
         return;
     }
+
     const targetProblem = problems[index];
     if (targetProblem && targetProblem.text.startsWith(val)) {
+        // 正解入力
         playSE('/sounds/se_type.mp3');
         newVals[index] = val;
         setInputVals(newVals);
@@ -176,9 +180,22 @@ export default function GamePC({
           if (nextInput) nextInput.focus();
         }
     } else {
+        // タイポ発生
         setIsError(true);
         setTimeout(() => setIsError(false), 300);
-        playSE('/sounds/se_typo.mp3');
+
+        // 打つべきだった正しい文字を特定して通知
+        if (targetProblem && onTypo) {
+            const expectedChar = targetProblem.text[inputVals[index].length];
+            if (expectedChar) {
+                onTypo(expectedChar);
+            } else {
+                // 文字列を超えている場合などは汎用SEのみ
+                playSE('/sounds/se_typo.mp3');
+            }
+        } else {
+            playSE('/sounds/se_typo.mp3');
+        }
     }
   };
 
@@ -213,7 +230,6 @@ export default function GamePC({
           </div>
         )}
 
-        {/* 解答フェーズ。isLockedまたはwaiting時はタイマーを停止 */}
         {gameState === 'answer' && (
           <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
             <style>{`@keyframes shrink-answer-bar { from { width: 100%; } to { width: 0%; } }`}</style>

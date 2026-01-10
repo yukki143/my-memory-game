@@ -4,13 +4,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import GamePC from './GamePC';
 import GameMobile from './GameMobile';
 import ForestPath from './ForestPath';
-import { DEFAULT_SETTINGS } from '../types';
+import { DEFAULT_SETTINGS, type Problem } from '../types';
 import { useSound } from '../hooks/useSound';
-
-type Problem = {
-  text: string;
-  kana: string;
-};
 
 type MobileScoreBoardProps = {
   myScore: number;
@@ -73,7 +68,7 @@ function BattleMode() {
   
   // 演出・同期用ステート
   const [roundResult, setRoundResult] = useState<'correct' | 'wrong' | null>(null);
-  const [roundWinnerId, setRoundWinnerId] = useState<string | null>(null); // ★追加: ラウンド勝者を管理
+  const [roundWinnerId, setRoundWinnerId] = useState<string | null>(null);
   const [iMissed, setIMissed] = useState(false);
   const [opponentMissed, setOpponentMissed] = useState(false);
   const [startTime, setStartTime] = useState(0);
@@ -81,7 +76,11 @@ function BattleMode() {
   const [isRetryReady, setIsRetryReady] = useState(false);
   const [opponentRetryReady, setOpponentRetryReady] = useState(false);
   const [winStreak, setWinStreak] = useState(0); 
+  
+  // プレイ分析用ステート
   const [missedProblems, setMissedProblems] = useState<Problem[]>([]);
+  const [myTypoCount, setMyTypoCount] = useState(0);
+  const [missedKeyStats, setMissedKeyStats] = useState<{ [key: string]: number }>({});
   const [opponentName, setOpponentName] = useState("Rival");
 
   const socketRef = useRef<WebSocket | null>(null);
@@ -115,10 +114,8 @@ function BattleMode() {
         if (!isMounted) return;
         const msg = event.data as string;
         
-        // SERVER: コマンドの処理
         if (msg.startsWith("SERVER:")) {
           const command = msg.substring(7);
-          
           if (command === "MATCHED") {
             prepareNextGame();
             startCountdown();
@@ -128,10 +125,8 @@ function BattleMode() {
             try {
               const data = JSON.parse(command.substring(11));
               if (data.round <= roundNumberRef.current && roundNumberRef.current !== 0) return;
-              
               setRoundNumber(data.round);
               setServerSeed(data.seed);
-              // ラウンド開始時に演出とミス状態、勝者情報をリセット
               setRoundResult(null);
               setRoundWinnerId(null);
               setIMissed(false);
@@ -141,7 +136,6 @@ function BattleMode() {
           return;
         }
 
-        // プレイヤー間メッセージの処理 (senderId:command)
         if (msg.includes(":")) {
           const parts = msg.split(":");
           const senderId = parts[0];
@@ -151,7 +145,6 @@ function BattleMode() {
             if (senderId !== playerId) setOpponentName(command.substring(5));
           }
           else if (command.startsWith("SCORE_UP")) {
-            // ★修正: 誰かが正解した瞬間に勝者IDをセットしてロックを開始
             setRoundWinnerId(senderId);
             if (senderId === playerId) {
               setRoundResult('correct');
@@ -196,7 +189,6 @@ function BattleMode() {
       }
   };
 
-  // 終了判定
   useEffect(() => {
     if (gameStatus !== 'playing') return;
     if (CONDITION_TYPE === 'score') {
@@ -221,10 +213,12 @@ function BattleMode() {
     setIMissed(false);
     setOpponentMissed(false);
     setRoundResult(null);
-    setRoundWinnerId(null); // 追加
+    setRoundWinnerId(null);
     setIsRetryReady(false);
     setOpponentRetryReady(false);
     setMissedProblems([]);
+    setMyTypoCount(0); // リセット
+    setMissedKeyStats({}); // リセット
     setClearTime(0);
     setRoundNumber(0);
   };
@@ -236,24 +230,56 @@ function BattleMode() {
   };
 
   const addScore = () => {
-    // ★修正: すでに誰かが正解している場合は送信しない
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     setMyScore(prev => prev + 1);
     wsSend(`SCORE_UP:round${roundNumber}`); 
   };
 
   const sendMiss = (problem?: Problem) => {
-    // ★修正: すでに誰かが正解している場合は送信しない
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     if (problem) setMissedProblems(prev => [...prev, problem]);
     wsSend(`MISS:round${roundNumber}`);
   };
 
-  const handleTypo = () => {
-      if (gameStatus === 'playing') playSE('/sounds/se_typo.mp3');
+  // 収集ロジックの強化
+  const handleTypo = (expectedChar: string) => {
+      if (gameStatus === 'playing') {
+          playSE('/sounds/se_typo.mp3');
+          setMyTypoCount(prev => prev + 1);
+          setMissedKeyStats(prev => {
+              const char = expectedChar.toUpperCase();
+              return { ...prev, [char]: (prev[char] || 0) + 1 };
+          });
+      }
   };
 
-  // カウントダウン処理
+  // 評価用ヘルパー関数
+  const getTypingRank = (count: number, score: number) => {
+      if (count === 0 && score === 0) return '-';
+      if (count === 0) return 'S';
+      if (count <= 3) return 'A';
+      if (count <= 8) return 'B';
+      if (count <= 12) return 'C';
+      if (count <= 15) return 'D';
+      return 'E';
+  };
+
+  const getMemoryRank = (score: number, miss: number) => {
+      if (score === 0 && miss === 0) return '-';
+      if (miss === 0) return 'S';
+      if (miss === 1) return 'A';
+      if (miss <= 3) return 'B';
+      if (miss === 4) return 'C';
+      if (miss === 5) return 'D';
+      return 'E';
+  };
+
+  const getSortedMissedKeys = () => {
+      return Object.entries(missedKeyStats)
+          .sort(([, a], [, b]) => b - a)
+          .slice(0, 5);
+  };
+
   useEffect(() => {
     if (gameStatus === 'countdown') {
         const interval = setInterval(() => {
@@ -272,8 +298,6 @@ function BattleMode() {
   }, [gameStatus]);
 
   const showHUD = gameStatus === 'countdown' || gameStatus === 'playing';
-
-  // ★修正: 入力ロックの条件を「自分がミスした」or「自分が正解した」or「相手を含め誰かが正解した」に拡大
   const isInputLocked = iMissed || roundResult === 'correct' || !!roundWinnerId;
 
   return (
@@ -298,7 +322,6 @@ function BattleMode() {
         />
       )}
 
-      {/* ラウンドごとの〇✕演出 */}
       {roundResult && gameStatus === 'playing' && (
           <div className="fixed inset-0 z-[70] flex items-center justify-center pointer-events-none animate-pop-in">
               <div className={`text-[20rem] font-black drop-shadow-2xl ${roundResult === 'correct' ? 'text-green-500' : 'text-red-600'}`}>
@@ -307,7 +330,6 @@ function BattleMode() {
           </div>
       )}
 
-      {/* 待機用オーバーレイ (自分がミスして、まだ相手が決着をつけていない時) */}
       {iMissed && !roundWinnerId && gameStatus === 'playing' && (
           <div className="fixed inset-0 z-[60] bg-black/50 flex flex-col items-center justify-center animate-fade-in">
               <div className="text-xl font-bold text-white animate-pulse">相手の回答を待っています...</div>
@@ -353,7 +375,7 @@ function BattleMode() {
                                       roomId={roomId} playerId={playerId} setId={memorySetId}
                                       seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)}
                                       totalAttempted={roundNumber}
-                                      isLocked={isInputLocked} // 入力ロックを渡す
+                                      isLocked={isInputLocked}
                                     /> 
                                 ) : (
                                     <GamePC 
@@ -361,7 +383,7 @@ function BattleMode() {
                                         roomId={roomId} playerId={playerId} setId={memorySetId}
                                         settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)}
                                         totalAttempted={roundNumber}
-                                        isLocked={isInputLocked} // 入力ロックを渡す
+                                        isLocked={isInputLocked}
                                     />
                                 )}
                             </div>
@@ -380,27 +402,95 @@ function BattleMode() {
                     </div>
                 )}
 
+                {/* リザルト画面の再構築 */}
                 {gameStatus === 'finished' && (
-                    <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[85vh]'}`}>
-                        <div className="flex-1 h-full min-w-0">
+                    <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 
+                        ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[85vh]'}`}>
+                        
+                        {/* 左カラム: 結果とアクション */}
+                        <div className="w-full md:w-[45%] h-full min-w-0">
                             <div className="theme-wood-box p-6 h-full flex flex-col items-center shadow-2xl animate-fade-in-up">
                                 {myScore > opponentScore ? (
-                                    <div className="text-5xl md:text-7xl font-black text-yellow-500 mb-2 pt-12 animate-bounce">YOU WIN!</div>
+                                    <div className="text-5xl md:text-7xl font-black text-yellow-500 mb-2 pt-4 animate-bounce">YOU WIN!</div>
                                 ) : myScore < opponentScore ? (
-                                    <div className="text-5xl md:text-7xl font-black text-blue-500 mb-2 pt-12">YOU LOSE...</div>
+                                    <div className="text-5xl md:text-7xl font-black text-blue-500 mb-2 pt-4">YOU LOSE...</div>
                                 ) : (
-                                    <div className="text-5xl md:text-7xl font-black text-green-500 mb-2 pt-12">DRAW</div>
+                                    <div className="text-5xl md:text-7xl font-black text-green-500 mb-2 pt-4">DRAW</div>
                                 )}
-                                <div className="mt-8 bg-[#fff8e1] border-4 border-[#d4a373] rounded-2xl p-6 w-full max-w-xs text-center shadow-inner">
-                                    <div className="text-3xl font-bold text-[#8d6e63] mb-2">連続勝利数 👑</div>
+                                
+                                <div className="text-4xl md:text-6xl font-black mt-4 mb-6 text-[#5d4037] drop-shadow-md">
+                                    {clearTime.toFixed(2)} <span className="text-2xl font-hakoniwa">秒</span>
+                                </div>
+
+                                <div className="mb-8 bg-[#fff8e1] border-4 border-[#d4a373] rounded-2xl p-6 w-full max-w-xs text-center shadow-inner">
+                                    <div className="text-2xl font-bold text-[#8d6e63] mb-2">連続勝利数 👑</div>
                                     <div className="text-6xl font-black text-[#d97706]">{winStreak}</div>
                                 </div>
-                                <div className="mt-6 w-full flex justify-center">
+
+                                <div className="mt-auto w-full flex justify-center">
                                     {isRetryReady && !opponentRetryReady ? (
                                         <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div>
                                     ) : (
-                                        <button onClick={handleRetry} className="theme-leaf-btn py-3 rounded-xl font-black text-xl shadow-lg w-full max-w-xs">再戦する！</button>
+                                        <button onClick={handleRetry} className="theme-leaf-btn py-4 rounded-xl font-black text-xl shadow-lg w-full max-w-xs transition transform hover:scale-105">再戦する！</button>
                                     )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 右カラム: プレイ分析 */}
+                        <div className="flex-1 relative w-full md:w-auto">
+                            <div className={`${isMobile ? '' : 'md:absolute md:inset-0 h-full'} theme-wood-box p-6 flex flex-col shadow-2xl animate-fade-in-up overflow-hidden`}>
+                                <h3 className="text-2xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] font-hakoniwa">プレイ分析</h3>
+                                <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                                    
+                                    <div className="bg-[#fff8e1] p-4 rounded-xl border-4 border-[#d4a373] shadow-inner">
+                                        <h4 className="text-sm font-bold text-[#5d4037] mb-3 text-center border-b border-[#d4a373] pb-1 mx-4">総合評価</h4>
+                                        <div className="flex justify-around items-center">
+                                            <div className="text-center">
+                                                <div className="text-sm font-bold text-[#8d6e63] mb-1">暗記力</div>
+                                                <div className="text-5xl font-black text-[#d97706]">{getMemoryRank(myScore, missedProblems.length)}</div>
+                                            </div>
+                                            {!isMobile && (
+                                                <>
+                                                    <div className="w-px h-12 bg-[#d4a373]"></div>
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-bold text-[#8d6e63] mb-1">タイピング</div>
+                                                        <div className="text-5xl font-black text-[#d97706]">{getTypingRank(myTypoCount, myScore)}</div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {!isMobile && (
+                                        <div className="bg-white/80 p-4 rounded-xl border-2 border-red-200 shadow-sm">
+                                            <div className="text-sm font-bold text-red-800 mb-2">⌨️ 苦手なキー (Total: {myTypoCount})</div>
+                                            <div className="flex gap-2 flex-wrap">
+                                                {getSortedMissedKeys().map(([key, count]) => (
+                                                    <div key={key} className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-lg font-bold border border-red-200 flex items-center gap-2">
+                                                        <span className="font-mono text-2xl">{key}</span>
+                                                        <span className="text-sm opacity-60">x{count}</span>
+                                                    </div>
+                                                ))}
+                                                {getSortedMissedKeys().length === 0 && <span className="text-gray-400 text-sm italic">ミスなし！完璧です！</span>}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="bg-white/80 p-4 rounded-xl border-2 border-blue-200 shadow-sm min-h-[150px]">
+                                        <div className="text-sm font-bold text-blue-800 mb-2">❌ ミスした問題 (Total: {missedProblems.length})</div>
+                                        <div className="bg-white rounded border border-blue-100 max-h-[250px] overflow-y-auto">
+                                            <ul className="divide-y divide-blue-50">
+                                                {missedProblems.map((p, i) => (
+                                                    <li key={i} className="p-3 flex justify-between items-center hover:bg-blue-50/50">
+                                                        <span className="font-bold text-red-600 mr-2">{p.text}</span>
+                                                        <span className="text-gray-500 text-xs">{p.kana}</span>
+                                                    </li>
+                                                ))}
+                                                {missedProblems.length === 0 && <li className="p-3 text-center text-gray-400 text-sm">全問正解です！素晴らしい！</li>}
+                                            </ul>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
