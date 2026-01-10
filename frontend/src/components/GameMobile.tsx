@@ -12,7 +12,7 @@ type ApiResponse = {
 
 type Props = {
   onScore: () => void;
-  onWrong: (problem: Problem) => void;
+  onWrong: (problem?: Problem) => void; // オプショナルに修正
   resetKey: number;
   isSoloMode?: boolean;
   roomId?: string;
@@ -22,6 +22,7 @@ type Props = {
   settings?: GameSettings; 
   wrongHistory?: string[];
   totalAttempted?: number;
+  isLocked?: boolean; // 追加
 };
 
 type SlotItem = { text: string; sourceId: number; } | null;
@@ -29,7 +30,8 @@ type ChoiceItem = { id: number; text: string; isUsed: boolean; };
 type GameState = 'memorize' | 'quiz' | 'waiting' | 'loading';
 
 function GameMobile({ 
-  onScore, onWrong, resetKey, roomId, setId, seed, settings, wrongHistory, totalAttempted 
+  onScore, onWrong, resetKey, roomId, setId, seed, settings, 
+  wrongHistory, totalAttempted, isLocked 
 }: Props) {
 
   const { playSE } = useSound();
@@ -44,7 +46,6 @@ function GameMobile({
   const [selectedChoiceId, setSelectedChoiceId] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
   const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME);
-  const [overlayMark, setOverlayMark] = useState<boolean | null>(null);
   const [isFetching, setIsFetching] = useState(false);
 
   const latestRequestId = useRef(0);
@@ -55,7 +56,6 @@ function GameMobile({
   useEffect(() => { totalAttemptedRef.current = totalAttempted; }, [totalAttempted]);
   useEffect(() => { wrongHistoryRef.current = wrongHistory; }, [wrongHistory]);
 
-  // ★重要：ラウンドが変わった瞬間に古いタイマーやクリックを無効化する
   useEffect(() => {
     isProcessing.current = true;
   }, [resetKey]);
@@ -93,7 +93,6 @@ function GameMobile({
 
           setProblems(newProblems);
           setSlots(Array(splitCount).fill(null));
-          setOverlayMark(null);
           setSelectedChoiceId(null);
           setTimeLeft(MEMORIZE_TIME);
           setAnswerTimeLeft(ANSWER_TIME);
@@ -111,7 +110,7 @@ function GameMobile({
           setChoices(shuffled);
           setGameState('memorize');
           setIsFetching(false);
-          isProcessing.current = false; // 準備完了。受付開始
+          isProcessing.current = false;
 
       } catch (e) {
           console.error(e);
@@ -135,32 +134,31 @@ function GameMobile({
   }, [gameState, timeLeft, isFetching]);
 
   useEffect(() => {
-    if (gameState === 'quiz' && !isProcessing.current && !isFetching) {
+    if (gameState === 'quiz' && !isProcessing.current && !isFetching && !isLocked) {
         if (answerTimeLeft > 0) {
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            // 時間切れ判定
+            // タイムアウト
             if (!isProcessing.current) {
                 isProcessing.current = true;
                 setGameState('waiting');
-                setOverlayMark(false);
                 playSE('/sounds/se_wrong.mp3');
                 onWrong(problems[0]);
             }
         }
     }
-  }, [gameState, answerTimeLeft, isFetching]);
+  }, [gameState, answerTimeLeft, isFetching, isLocked]);
 
   const handleSelectChoice = (choiceId: number) => {
-      if (isProcessing.current || isFetching) return;
+      if (isProcessing.current || isFetching || isLocked) return;
       const choice = choices.find(c => c.id === choiceId);
       if (choice && choice.isUsed) return;
       setSelectedChoiceId(selectedChoiceId === choiceId ? null : choiceId);
   };
 
   const handleTapSlot = (slotIndex: number) => {
-      if (isProcessing.current || isFetching) return;
+      if (isProcessing.current || isFetching || isLocked) return;
       if (selectedChoiceId !== null) {
           const choice = choices.find(c => c.id === selectedChoiceId);
           if (!choice) return;
@@ -188,11 +186,10 @@ function GameMobile({
   };
 
   const handleSubmit = () => {
-      if (slots.some(s => s === null) || isProcessing.current || isFetching) return; 
+      if (slots.some(s => s === null) || isProcessing.current || isFetching || isLocked) return; 
       isProcessing.current = true;
       setGameState('waiting');
       const isCorrect = slots.every((s, i) => s?.text === problems[i].text);
-      setOverlayMark(isCorrect);
 
       if (isCorrect) {
           playSE('/sounds/se_correct.mp3');
@@ -205,8 +202,6 @@ function GameMobile({
 
   return (
     <div className="relative p-2 bg-orange-50 h-full flex flex-col items-center w-full overflow-hidden">
-      
-      {/* ロード中オーバーレイ */}
       {isFetching && (
         <div className="absolute inset-0 z-[100] bg-white/40 backdrop-blur-[2px] flex flex-col items-center justify-center animate-fade-in">
             <div className="text-xl font-black text-[#8d6e63] animate-pulse">Wait a Moment...</div>
@@ -236,14 +231,6 @@ function GameMobile({
             </div>
           )}
 
-          {overlayMark !== null && (
-              <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/10">
-                  <div className="text-9xl font-black drop-shadow-2xl animate-bounce-in">
-                      {overlayMark ? <span className="text-green-500">〇</span> : <span className="text-red-600">✕</span>}
-                  </div>
-              </div>
-          )}
-
           {gameState === 'memorize' && (
             <div className="flex-1 flex flex-col justify-center items-center w-full gap-4 overflow-y-auto">
               {problems.map((p, i) => (
@@ -263,7 +250,7 @@ function GameMobile({
                             <button 
                                 key={i} 
                                 onClick={() => handleTapSlot(i)} 
-                                disabled={gameState === 'waiting' || isFetching} 
+                                disabled={gameState === 'waiting' || isFetching || isLocked} 
                                 className={`relative w-full p-3 rounded-xl border-4 font-bold text-xl min-h-[60px] transition-all 
                                     ${slot ? 'bg-white border-[#8d6e63] text-[#5d4037]' : 'bg-black/5 border-dashed border-gray-400 text-gray-400'}`}
                             >
@@ -275,7 +262,7 @@ function GameMobile({
                 </div>
                 
                 <div className="h-16 flex items-center justify-center shrink-0 my-2">
-                    {slots.every(s => s !== null) && gameState !== 'waiting' && !isFetching && (
+                    {slots.every(s => s !== null) && gameState !== 'waiting' && !isFetching && !isLocked && (
                         <button 
                             onClick={handleSubmit} 
                             className="theme-leaf-btn px-10 py-3 rounded-full text-xl font-black shadow-lg transform active:scale-95 transition"
@@ -293,7 +280,7 @@ function GameMobile({
                                 <button 
                                     key={choice.id} 
                                     onClick={() => handleSelectChoice(choice.id)} 
-                                    disabled={choice.isUsed || gameState === 'waiting' || isFetching} 
+                                    disabled={choice.isUsed || gameState === 'waiting' || isFetching || isLocked} 
                                     className={`px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-all
                                         ${choice.isUsed ? 'bg-gray-300 text-gray-500 scale-90 opacity-50' : 
                                           selectedChoiceId === choice.id ? 'bg-[#8d6e63] text-white ring-4 ring-orange-200' : 'bg-white text-[#5d4037] active:bg-gray-100'}`}

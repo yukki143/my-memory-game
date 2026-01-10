@@ -71,6 +71,8 @@ function BattleMode() {
   const [roundNumber, setRoundNumber] = useState(0);
   const [serverSeed, setServerSeed] = useState<string>(""); 
   
+  // 演出・同期用ステート
+  const [roundResult, setRoundResult] = useState<'correct' | 'wrong' | null>(null);
   const [iMissed, setIMissed] = useState(false);
   const [opponentMissed, setOpponentMissed] = useState(false);
   const [startTime, setStartTime] = useState(0);
@@ -111,45 +113,59 @@ function BattleMode() {
       ws.onmessage = (event) => {
         if (!isMounted) return;
         const msg = event.data as string;
-        let senderId = "";
-        let command = "";
         
-        if (msg.includes(":")) {
-            const parts = msg.split(":");
-            senderId = parts[0];
-            command = parts.slice(1).join(":");
-        } else {
-            command = msg;
-        }
-
-        if (command === "MATCHED") {
+        // SERVER: コマンドの処理
+        if (msg.startsWith("SERVER:")) {
+          const command = msg.substring(7);
+          
+          if (command === "MATCHED") {
             prepareNextGame();
             startCountdown();
             wsSend("NAME:" + playerName);
-        } 
-        else if (command.startsWith("NEXT_ROUND:")) {
+          } 
+          else if (command.startsWith("NEXT_ROUND:")) {
             try {
-                const data = JSON.parse(command.substring(11));
-                if (data.round <= roundNumberRef.current && roundNumberRef.current !== 0) return;
-                
-                // ★修正: 新しいラウンドが始まったら、ミス状態を即座にリセットする
-                setRoundNumber(data.round);
-                setServerSeed(data.seed);
-                setIMissed(false);
-                setOpponentMissed(false);
+              const data = JSON.parse(command.substring(11));
+              if (data.round <= roundNumberRef.current && roundNumberRef.current !== 0) return;
+              
+              setRoundNumber(data.round);
+              setServerSeed(data.seed);
+              // ラウンド開始時に演出とミス状態をリセット
+              setRoundResult(null);
+              setIMissed(false);
+              setOpponentMissed(false);
             } catch (e) { console.error("NEXT_ROUND parse error", e); }
+          }
+          return;
         }
-        else if (command.startsWith("NAME:")) {
+
+        // プレイヤー間メッセージの処理 (senderId:command)
+        if (msg.includes(":")) {
+          const parts = msg.split(":");
+          const senderId = parts[0];
+          const command = parts.slice(1).join(":");
+
+          if (command.startsWith("NAME:")) {
             if (senderId !== playerId) setOpponentName(command.substring(5));
-        }
-        else if (command.startsWith("SCORE_UP")) {
-            if (senderId !== playerId) setOpponentScore(prev => prev + 1);
-        } 
-        else if (command.startsWith("MISS")) {
-            if (senderId !== playerId) setOpponentMissed(true);
-        } 
-        else if (command === "RETRY") {
+          }
+          else if (command.startsWith("SCORE_UP")) {
+            if (senderId === playerId) {
+              setRoundResult('correct');
+            } else {
+              setOpponentScore(prev => prev + 1);
+            }
+          } 
+          else if (command.startsWith("MISS")) {
+            if (senderId === playerId) {
+              setRoundResult('wrong');
+              setIMissed(true);
+            } else {
+              setOpponentMissed(true);
+            }
+          } 
+          else if (command === "RETRY") {
             if (senderId !== playerId) setOpponentRetryReady(true);
+          }
         }
       };
 
@@ -176,16 +192,16 @@ function BattleMode() {
       }
   };
 
+  // 終了判定
   useEffect(() => {
     if (gameStatus !== 'playing') return;
-    if (CONDITION_TYPE === 'score' && myScore >= WINNING_SCORE) finishGame(true);
-    else if (CONDITION_TYPE === 'total' && roundNumber > WINNING_SCORE) finishGame(myScore > opponentScore);
-  }, [myScore, roundNumber]);
-
-  useEffect(() => {
-    if (gameStatus !== 'playing') return;
-    if (CONDITION_TYPE === 'score' && opponentScore >= WINNING_SCORE) finishGame(false);
-  }, [opponentScore]);
+    if (CONDITION_TYPE === 'score') {
+      if (myScore >= WINNING_SCORE) finishGame(true);
+      else if (opponentScore >= WINNING_SCORE) finishGame(false);
+    } else if (CONDITION_TYPE === 'total') {
+      if (roundNumber > WINNING_SCORE) finishGame(myScore > opponentScore);
+    }
+  }, [myScore, opponentScore, roundNumber, gameStatus, CONDITION_TYPE, WINNING_SCORE]);
 
   const finishGame = (isWin: boolean) => {
     if (gameStatus === 'finished') return;
@@ -200,6 +216,7 @@ function BattleMode() {
     setOpponentScore(0);
     setIMissed(false);
     setOpponentMissed(false);
+    setRoundResult(null);
     setIsRetryReady(false);
     setOpponentRetryReady(false);
     setMissedProblems([]);
@@ -214,14 +231,13 @@ function BattleMode() {
   };
 
   const addScore = () => {
-    if (gameStatus !== 'playing' || iMissed) return;
+    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct') return;
     setMyScore(prev => prev + 1);
     wsSend(`SCORE_UP:round${roundNumber}`); 
   };
 
   const sendMiss = (problem?: Problem) => {
-    if (gameStatus !== 'playing' || iMissed) return;
-    setIMissed(true);
+    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct') return;
     if (problem) setMissedProblems(prev => [...prev, problem]);
     wsSend(`MISS:round${roundNumber}`);
   };
@@ -230,6 +246,7 @@ function BattleMode() {
       if (gameStatus === 'playing') playSE('/sounds/se_typo.mp3');
   };
 
+  // カウントダウン処理
   useEffect(() => {
     if (gameStatus === 'countdown') {
         const interval = setInterval(() => {
@@ -271,9 +288,18 @@ function BattleMode() {
         />
       )}
 
+      {/* ラウンドごとの〇✕演出 */}
+      {roundResult && gameStatus === 'playing' && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center pointer-events-none animate-pop-in">
+              <div className={`text-[20rem] font-black drop-shadow-2xl ${roundResult === 'correct' ? 'text-green-500' : 'text-red-600'}`}>
+                  {roundResult === 'correct' ? '〇' : '✕'}
+              </div>
+          </div>
+      )}
+
+      {/* 待機用オーバーレイ */}
       {iMissed && !opponentMissed && gameStatus === 'playing' && (
           <div className="fixed inset-0 z-[60] bg-black/50 flex flex-col items-center justify-center animate-fade-in">
-              <div className="text-4xl md:text-6xl font-black text-white drop-shadow-lg mb-2">WRONG!</div>
               <div className="text-xl font-bold text-white animate-pulse">相手の回答を待っています...</div>
           </div>
       )}
@@ -317,6 +343,7 @@ function BattleMode() {
                                       roomId={roomId} playerId={playerId} setId={memorySetId}
                                       seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)}
                                       totalAttempted={roundNumber}
+                                      isLocked={iMissed || roundResult === 'correct'} // 入力ロックを渡す
                                     /> 
                                 ) : (
                                     <GamePC 
@@ -324,6 +351,7 @@ function BattleMode() {
                                         roomId={roomId} playerId={playerId} setId={memorySetId}
                                         settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)}
                                         totalAttempted={roundNumber}
+                                        isLocked={iMissed || roundResult === 'correct'} // 入力ロックを渡す
                                     />
                                 )}
                             </div>
@@ -358,7 +386,7 @@ function BattleMode() {
                                     <div className="text-6xl font-black text-[#d97706]">{winStreak}</div>
                                 </div>
                                 <div className="mt-6 w-full flex justify-center">
-                                    {isRetryReady ? (
+                                    {isRetryReady && !opponentRetryReady ? (
                                         <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div>
                                     ) : (
                                         <button onClick={handleRetry} className="theme-leaf-btn py-3 rounded-xl font-black text-xl shadow-lg w-full max-w-xs">再戦する！</button>

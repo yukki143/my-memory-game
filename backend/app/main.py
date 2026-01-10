@@ -169,8 +169,12 @@ room_passwords: Dict[str, str] = {}
 room_owner_tokens: Dict[str, str] = {}
 room_clients: Dict[str, Set[str]] = {}
 
+# 対戦中の動的な状態管理
+room_player_states: Dict[str, Dict[str, str]] = {} # room_id -> {player_id: status("pending"|"correct"|"wrong")}
+room_retry_players: Dict[str, Set[str]] = {}       # room_id -> {player_id, ...}
+
 # ==========================
-#  API エンドポイント
+#  API エンドポイント (省略なし)
 # ==========================
 
 @app.get("/api/ranking", response_model=List[schemas.RankEntry])
@@ -345,7 +349,7 @@ def delete_room(room_id: str, token: Optional[str] = None, current_user: models.
     is_empty = active_rooms[room_id].playerCount <= 0
     if not (is_owner or is_empty):
         raise HTTPException(status_code=403, detail="権限がありません")
-    for d in [active_rooms, room_passwords, room_owner_tokens, room_clients]:
+    for d in [active_rooms, room_passwords, room_owner_tokens, room_clients, room_player_states, room_retry_players]:
         d.pop(room_id, None)
     return {"message": "Room deleted"}
 
@@ -359,15 +363,39 @@ async def delayed_room_cleanup(room_id: str):
     try:
         await asyncio.sleep(5)
         if room_id in active_rooms and active_rooms[room_id].playerCount <= 0:
-            for d in [active_rooms, room_passwords, room_owner_tokens, room_clients]:
+            for d in [active_rooms, room_passwords, room_owner_tokens, room_clients, room_player_states, room_retry_players]:
                 d.pop(room_id, None)
             manager.active_connections.pop(room_id, None)
     except asyncio.CancelledError: pass
     finally: manager.cleanup_tasks.pop(room_id, None)
 
 # ==========================
-#  WebSocket 審判ロジック
+#  WebSocket 審判ロジック (強化版)
 # ==========================
+
+async def proceed_to_next_round(room_id: str, round_to_finish: int):
+    """
+    指定されたラウンドを終了し、少し待機してから次のラウンドへ進める。
+    誰かが正解した時、または全員がミスした時に呼ばれる。
+    """
+    room = active_rooms.get(room_id)
+    if not room or room.currentRound != round_to_finish:
+        return
+
+    # 演出用の待機 (1.5秒) - クライアント側で〇✕を表示する時間を確保
+    await asyncio.sleep(1.5)
+
+    # 次のラウンドの準備
+    room.currentRound += 1
+    room.seed = str(uuid.uuid4())
+    
+    # 状態をリセット
+    if room_id in room_player_states:
+        for pid in room_player_states[room_id]:
+            room_player_states[room_id][pid] = "pending"
+
+    next_info = json.dumps({"round": room.currentRound, "seed": room.seed})
+    await manager.broadcast(f"SERVER:NEXT_ROUND:{next_info}", room_id)
 
 @app.websocket("/ws/battle/{room_id}/{player_id}")
 @app.websocket("/ws/{room_id}/{player_id}")
@@ -378,7 +406,7 @@ async def websocket_endpoint(
     setName: Optional[str] = None
 ):
     await websocket.accept()
-    await asyncio.sleep(0.1) # Strict Mode対策の微小待機
+    await asyncio.sleep(0.1)
 
     if room_id not in active_rooms:
         await websocket.close(code=4000)
@@ -391,13 +419,17 @@ async def websocket_endpoint(
     room = active_rooms[room_id]
     room.playerCount = len(room_clients[room_id])
     
+    # ルーム内の各プレイヤーの状態管理を初期化
+    if room_id not in room_player_states:
+        room_player_states[room_id] = {}
+    room_player_states[room_id][player_id] = "pending"
+
     try:
-        # マッチング成立時の初期化 (2人目が接続したとき)
+        # マッチング成立
         if room.playerCount == 2 and room.status == "waiting":
             room.status = "playing"
             room.currentRound = 1
             room.seed = str(uuid.uuid4())
-            # マネージャー内で全員が CONNECTED になるまでわずかに待機
             await asyncio.sleep(0.3)
             await manager.broadcast("SERVER:MATCHED", room_id)
             init_payload = json.dumps({"round": room.currentRound, "seed": room.seed})
@@ -409,40 +441,68 @@ async def websocket_endpoint(
             sender_id = parts[0]
             command = parts[1] if len(parts) > 1 else ""
 
-            # 正解時の進行
+            # --------------------------------------------------
+            # 正解 (SCORE_UP) 受信時
+            # --------------------------------------------------
             if command.startswith("SCORE_UP:round"):
                 try:
                     reported_round = int(command.replace("SCORE_UP:round", ""))
                     if reported_round == room.currentRound:
+                        # まず正解したことを全員に通知 (クライアント側で〇を表示)
                         await manager.broadcast(data, room_id)
-                        room.currentRound += 1
-                        room.seed = str(uuid.uuid4())
-                        next_info = json.dumps({"round": room.currentRound, "seed": room.seed})
-                        await manager.broadcast(f"SERVER:NEXT_ROUND:{next_info}", room_id)
+                        
+                        room_player_states[room_id][player_id] = "correct"
+                        # 誰かが正解したら、即座に次のラウンドへのカウントダウンを開始
+                        asyncio.create_task(proceed_to_next_round(room_id, reported_round))
                 except Exception as e: print(e)
                 continue
 
-            # ミス(MISS)時の進行
+            # --------------------------------------------------
+            # ミス (MISS) 受信時
+            # --------------------------------------------------
             if command.startswith("MISS:round"):
                 try:
                     reported_round = int(command.replace("MISS:round", ""))
                     if reported_round == room.currentRound:
+                        # ミスしたことを通知 (クライアント側で本人のみ✕を表示、または演出)
                         await manager.broadcast(data, room_id)
-                        # ミス時は、少し余韻をおいてから次へ（または相手が正解するのを待つ）
-                        # ここでは簡易的に誰かがミスしても強制的に次へは行かず、転送のみ行う。
-                        # ただし、全員ミス時のフリーズ防止のため、本来はタイマー管理が必要。
+                        
+                        room_player_states[room_id][player_id] = "wrong"
+                        
+                        # 全員が "wrong" または "correct" になったか確認
+                        states = room_player_states[room_id].values()
+                        if all(s == "wrong" for s in states):
+                            # 全員がミスの場合は、全員✕を確認させてから次の問題へ
+                            asyncio.create_task(proceed_to_next_round(room_id, reported_round))
                 except Exception as e: print(e)
                 continue
 
-            if command == "MATCHED":
-                room.status = "playing"
-                room.currentRound = 1
-                room.seed = str(uuid.uuid4())
-                await manager.broadcast("SERVER:MATCHED", room_id)
-                init_payload = json.dumps({"round": room.currentRound, "seed": room.seed})
-                await manager.broadcast(f"SERVER:NEXT_ROUND:{init_payload}", room_id)
+            # --------------------------------------------------
+            # 再戦 (RETRY) 受信時
+            # --------------------------------------------------
+            if command == "RETRY":
+                if room_id not in room_retry_players:
+                    room_retry_players[room_id] = set()
+                room_retry_players[room_id].add(player_id)
+                
+                # 全員(2人)が再戦希望を出したか
+                if len(room_retry_players[room_id]) >= room.playerCount:
+                    # ルーム状態のリセット
+                    room.status = "playing"
+                    room.currentRound = 1
+                    room.seed = str(uuid.uuid4())
+                    room_retry_players[room_id].clear()
+                    
+                    # 全員に再戦開始を通知
+                    await manager.broadcast("SERVER:MATCHED", room_id)
+                    init_payload = json.dumps({"round": room.currentRound, "seed": room.seed})
+                    await manager.broadcast(f"SERVER:NEXT_ROUND:{init_payload}", room_id)
+                else:
+                    # 片方だけ準備完了なら、その旨を転送 (相手の画面に「待機中」を出すため)
+                    await manager.broadcast(data, room_id)
                 continue
 
+            # その他のメッセージ (名前通知など)
             await manager.broadcast(data, room_id)
             
     except (WebSocketDisconnect, Exception) as e:
@@ -454,10 +514,13 @@ async def websocket_endpoint(
             if room_id in active_rooms:
                 room.playerCount = len(room_clients[room_id])
                 if room.playerCount == 1: room.status = "waiting"
+                if room_id in room_player_states:
+                    room_player_states[room_id].pop(player_id, None)
                 if room.playerCount <= 0:
                     task = asyncio.create_task(delayed_room_cleanup(room_id))
                     manager.cleanup_tasks[room_id] = task
 
+# 静的ファイルの配信設定
 frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
 if os.path.exists(frontend_path):
     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")

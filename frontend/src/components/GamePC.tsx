@@ -1,14 +1,13 @@
 // src/GamePC.tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { Problem } from '../types';
-import type { GameSettings } from '../types';
+import type { Problem, GameSettings } from '../types';
 import { useSound } from '../hooks/useSound';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 type GamePCProps = {
   onScore?: () => void;
-  onWrong?: (problem: Problem) => void;
+  onWrong?: (problem?: Problem) => void; // 引数をオプショナルに変更
   onTypo?: (expectedChar: string) => void;
   resetKey: number;
   settings?: GameSettings;
@@ -19,6 +18,7 @@ type GamePCProps = {
   wrongHistory?: string[];
   totalAttempted?: number;
   isSoloMode?: boolean;
+  isLocked?: boolean; // 追加
 };
 
 type ApiResponse = {
@@ -26,7 +26,11 @@ type ApiResponse = {
   options: Problem[];
 };
 
-export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, roomId, playerId, setId, seed, wrongHistory, totalAttempted, isSoloMode }: GamePCProps) {
+export default function GamePC({ 
+  onScore, onWrong, onTypo, resetKey, settings, 
+  roomId, playerId, setId, seed, wrongHistory, 
+  totalAttempted, isLocked 
+}: GamePCProps) {
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
   const ANSWER_TIME = settings?.answerTime || 10;
@@ -42,17 +46,21 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
 
   const latestRequestId = useRef(0);
   const isProcessing = useRef(false);
-  const isComposing = useRef(false);
   const { playSE } = useSound();
   
   const totalAttemptedRef = useRef(totalAttempted);
   const wrongHistoryRef = useRef(wrongHistory);
   const inputRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
-  const [showWrongMark, setShowWrongMark] = useState(false);
 
-  // ★重要：resetKey（ラウンド番号）が変わったら、即座に全処理を停止する
+  // 1. 自動フォーカス処理: 回答フェーズに入ったら最初のtextareaにフォーカス
   useEffect(() => {
-    isProcessing.current = true; // 新しいデータが来るまで全てのアクションをブロック
+    if (gameState === 'answer' && inputRefs.current[0]) {
+      inputRefs.current[0].focus();
+    }
+  }, [gameState]);
+
+  useEffect(() => {
+    isProcessing.current = true;
   }, [resetKey]);
 
   const loadProblem = useCallback(async () => {
@@ -86,14 +94,13 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
         setProblems(newProblems);
         setInputVals(Array(splitCount).fill(""));
         setResults(Array(splitCount).fill(null));
-        setShowWrongMark(false);
         setIsError(false);
         setTimeLeft(MEMORIZE_TIME);
         setAnswerTimeLeft(ANSWER_TIME);
         
         setGameState('memorize');
         setIsFetching(false);
-        isProcessing.current = false; // 通信が終わって準備ができてから受付開始
+        isProcessing.current = false;
 
     } catch (e) {
         console.error(e);
@@ -117,18 +124,19 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
   }, [gameState, timeLeft, isFetching]);
 
   useEffect(() => {
-    if (gameState === 'answer' && !isProcessing.current && !isFetching) {
+    if (gameState === 'answer' && !isProcessing.current && !isFetching && !isLocked) {
         if (answerTimeLeft > 0) {
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            handleEnterKey();
+            // 2. タイムアウト時の処理
+            handleEnterKey(true);
         }
     }
-  }, [gameState, answerTimeLeft, isFetching]);
+  }, [gameState, answerTimeLeft, isFetching, isLocked]);
 
   const handleAllCorrect = () => {
-      if (isProcessing.current || gameState === 'waiting') return; 
+      if (isProcessing.current || gameState === 'waiting' || isLocked) return; 
       playSE('/sounds/se_correct.mp3');
       setResults(Array(splitCount).fill(true));
       isProcessing.current = true;
@@ -136,23 +144,23 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
       if (onScore) onScore();
   };
 
-  const handleEnterKey = () => {
-      if (isComposing.current || gameState === 'waiting' || isProcessing.current) return;
+  const handleEnterKey = (isTimeout = false) => {
+      if (gameState === 'waiting' || isProcessing.current || isLocked) return;
       const isAllCorrect = problems.every((p, i) => inputVals[i] === p.text);
 
-      if (isAllCorrect) {
+      if (isAllCorrect && !isTimeout) {
           handleAllCorrect();
       } else {
+          // 誤答またはタイムアウト
           playSE('/sounds/se_wrong.mp3');
-          setShowWrongMark(true);
           setGameState('waiting');
           isProcessing.current = true;
-          if (onWrong && problems[0]) onWrong(problems[0]);
+          if (onWrong) onWrong(problems[0]);
       }
   };
 
   const handleInputChange = (index: number, val: string) => {
-    if (gameState === 'waiting' || isProcessing.current) return;
+    if (gameState === 'waiting' || isProcessing.current || isLocked) return;
     const newVals = [...inputVals];
     if (val.length < newVals[index].length) {
         newVals[index] = val;
@@ -191,19 +199,6 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
       )}
 
       <div className={`w-full h-full flex flex-col transition-opacity duration-300 ${isFetching ? 'opacity-20' : 'opacity-100'}`}>
-        
-        {(results.every(r => r === true) && results.length > 0) && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
-                <div className="text-9xl font-black text-green-500 drop-shadow-2xl animate-bounce-in">〇</div>
-            </div>
-        )}
-
-        {showWrongMark && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-none">
-                <div className="text-9xl font-black text-red-600 drop-shadow-2xl animate-bounce-in">✕</div>
-            </div>
-        )}
-
         {gameState === 'memorize' && problems.length > 0 && (
           <div className="flex flex-col w-full h-full">
               <div className="w-full h-2 bg-gray-300 rounded-full mb-2 overflow-hidden relative">
@@ -234,10 +229,10 @@ export default function GamePC({ onScore, onWrong, onTypo, resetKey, settings, r
               <div key={idx} className="flex flex-col h-full bg-[#fff8e1] rounded-2xl p-1 border-4 border-[#d7ccc8] shadow-[0_4px_0_rgba(141,110,99,0.5)] relative overflow-hidden">
                 <textarea
                   ref={(el) => { inputRefs.current[idx] = el; }}
-                  disabled={gameState === 'waiting' || isFetching}
+                  disabled={gameState === 'waiting' || isFetching || isLocked}
                   className={`flex-1 bg-transparent rounded-xl p-4 pt-8 text-center resize-none outline-none w-full font-black text-[#5d4037] text-4xl ${isError ? 'animate-shake text-red-500' : ''}`}
                   style={{ caretColor: '#8d6e63' }} 
-                  placeholder="タイプ..."
+                  placeholder={isLocked ? "待機中..." : "タイプ..."}
                   value={inputVals[idx] || ""}
                   onChange={(e) => handleInputChange(idx, e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEnterKey(); } }}
