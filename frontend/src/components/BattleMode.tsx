@@ -66,7 +66,6 @@ function BattleMode() {
   const [roundNumber, setRoundNumber] = useState(0);
   const [serverSeed, setServerSeed] = useState<string>(""); 
   
-  // 演出・同期用ステート
   const [roundResult, setRoundResult] = useState<'correct' | 'wrong' | null>(null);
   const [roundWinnerId, setRoundWinnerId] = useState<string | null>(null);
   const [iMissed, setIMissed] = useState(false);
@@ -77,7 +76,6 @@ function BattleMode() {
   const [opponentRetryReady, setOpponentRetryReady] = useState(false);
   const [winStreak, setWinStreak] = useState(0); 
   
-  // プレイ分析用ステート
   const [missedProblems, setMissedProblems] = useState<Problem[]>([]);
   const [myTypoCount, setMyTypoCount] = useState(0);
   const [missedKeyStats, setMissedKeyStats] = useState<{ [key: string]: number }>({});
@@ -117,6 +115,9 @@ function BattleMode() {
         if (msg.startsWith("SERVER:")) {
           const command = msg.substring(7);
           if (command === "MATCHED") {
+            // ★重要: 新しい試合が始まるため、Refを強制的に0に戻す
+            // これにより、再戦の「ラウンド1」が古いデータとして無視されるのを防ぐ
+            roundNumberRef.current = 0;
             prepareNextGame();
             startCountdown();
             wsSend("NAME:" + playerName);
@@ -124,7 +125,10 @@ function BattleMode() {
           else if (command.startsWith("NEXT_ROUND:")) {
             try {
               const data = JSON.parse(command.substring(11));
+              
+              // ★修正点: roundNumberRef.currentが0（リセット後）なら必ず受け入れる
               if (data.round <= roundNumberRef.current && roundNumberRef.current !== 0) return;
+              
               setRoundNumber(data.round);
               setServerSeed(data.seed);
               setRoundResult(null);
@@ -217,10 +221,10 @@ function BattleMode() {
     setIsRetryReady(false);
     setOpponentRetryReady(false);
     setMissedProblems([]);
-    setMyTypoCount(0); // リセット
-    setMissedKeyStats({}); // リセット
+    setMyTypoCount(0); 
+    setMissedKeyStats({}); 
     setClearTime(0);
-    setRoundNumber(0);
+    setRoundNumber(0); // Stateも明示的にリセット
   };
 
   const handleRetry = () => {
@@ -241,7 +245,6 @@ function BattleMode() {
     wsSend(`MISS:round${roundNumber}`);
   };
 
-  // 収集ロジックの強化
   const handleTypo = (expectedChar: string) => {
       if (gameStatus === 'playing') {
           playSE('/sounds/se_typo.mp3');
@@ -253,7 +256,6 @@ function BattleMode() {
       }
   };
 
-  // 評価用ヘルパー関数
   const getTypingRank = (count: number, score: number) => {
       if (count === 0 && score === 0) return '-';
       if (count === 0) return 'S';
@@ -402,12 +404,10 @@ function BattleMode() {
                     </div>
                 )}
 
-                {/* リザルト画面の再構築 */}
                 {gameStatus === 'finished' && (
                     <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 
                         ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[85vh]'}`}>
                         
-                        {/* 左カラム: 結果とアクション */}
                         <div className="w-full md:w-[45%] h-full min-w-0">
                             <div className="theme-wood-box p-6 h-full flex flex-col items-center shadow-2xl animate-fade-in-up">
                                 {myScore > opponentScore ? (
@@ -437,7 +437,6 @@ function BattleMode() {
                             </div>
                         </div>
 
-                        {/* 右カラム: プレイ分析 */}
                         <div className="flex-1 relative w-full md:w-auto">
                             <div className={`${isMobile ? '' : 'md:absolute md:inset-0 h-full'} theme-wood-box p-6 flex flex-col shadow-2xl animate-fade-in-up overflow-hidden`}>
                                 <h3 className="text-2xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] font-hakoniwa">プレイ分析</h3>

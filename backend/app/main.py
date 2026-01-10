@@ -149,7 +149,7 @@ class RoomInfo(BaseModel):
     answerTime: int = 10
     questionsPerRound: int = 1
     currentRound: int = 0
-    resolvedRound: int = 0 # ★追加: 決着済みの最新ラウンド番号
+    resolvedRound: int = 0 
     seed: Optional[str] = None 
 
 class CreateRoomRequest(BaseModel):
@@ -171,8 +171,8 @@ room_owner_tokens: Dict[str, str] = {}
 room_clients: Dict[str, Set[str]] = {}
 
 # 対戦中の動的な状態管理
-room_player_states: Dict[str, Dict[str, str]] = {} # room_id -> {player_id: status("pending"|"correct"|"wrong")}
-room_retry_players: Dict[str, Set[str]] = {}       # room_id -> {player_id, ...}
+room_player_states: Dict[str, Dict[str, str]] = {} 
+room_retry_players: Dict[str, Set[str]] = {}       
 
 # ==========================
 #  API エンドポイント
@@ -372,7 +372,7 @@ async def delayed_room_cleanup(room_id: str):
     finally: manager.cleanup_tasks.pop(room_id, None)
 
 # ==========================
-#  WebSocket 審判ロジック (強化版)
+#  WebSocket 審判ロジック (同期修正版)
 # ==========================
 
 async def proceed_to_next_round(room_id: str, round_to_finish: int):
@@ -380,7 +380,7 @@ async def proceed_to_next_round(room_id: str, round_to_finish: int):
     指定されたラウンドを終了し、少し待機してから次のラウンドへ進める。
     """
     room = active_rooms.get(room_id)
-    # ★ 二重実行防止: 既に次のラウンドへ進んでいる場合は無視
+    # 二重実行防止
     if not room or room.currentRound != round_to_finish:
         return
 
@@ -426,10 +426,12 @@ async def websocket_endpoint(
     room_player_states[room_id][player_id] = "pending"
 
     try:
-        if room.playerCount == 2 and room.status == "waiting":
+        # ★修正1: 初回マッチング（currentRound == 0）の時のみ自動開始する
+        # これにより、一方が再接続しただけで勝手に再戦が始まるのを防ぐ
+        if room.playerCount == 2 and room.status == "waiting" and room.currentRound == 0:
             room.status = "playing"
             room.currentRound = 1
-            room.resolvedRound = 0 # 初期化
+            room.resolvedRound = 0 
             room.seed = str(uuid.uuid4())
             await asyncio.sleep(0.3)
             await manager.broadcast("SERVER:MATCHED", room_id)
@@ -448,16 +450,11 @@ async def websocket_endpoint(
             if command.startswith("SCORE_UP:round"):
                 try:
                     reported_round = int(command.replace("SCORE_UP:round", ""))
-                    # ★ 判定強化: 現在のラウンドかつ、まだこのラウンドで正解者が出ていない場合のみ受理
+                    # ★修正: 現在のラウンドかつ、まだ決着していない場合のみ受理
                     if reported_round == room.currentRound and reported_round > room.resolvedRound:
-                        # 即座にこのラウンドを決着済みとしてロック
                         room.resolvedRound = reported_round
-                        
-                        # 全員に正解を通知（ブロードキャストは1回だけになる）
                         await manager.broadcast(data, room_id)
-                        
                         room_player_states[room_id][player_id] = "correct"
-                        # 次のラウンドへの移行タスクを開始
                         asyncio.create_task(proceed_to_next_round(room_id, reported_round))
                 except Exception as e: print(e)
                 continue
@@ -468,40 +465,42 @@ async def websocket_endpoint(
             if command.startswith("MISS:round"):
                 try:
                     reported_round = int(command.replace("MISS:round", ""))
-                    # ★ 既に決着済みのラウンドに対するミス通知は無視（ちらつき防止）
                     if reported_round == room.currentRound and reported_round > room.resolvedRound:
-                        # ミスしたことを通知
                         await manager.broadcast(data, room_id)
                         room_player_states[room_id][player_id] = "wrong"
-                        
-                        # 全員がミスしたか判定
                         states = room_player_states[room_id].values()
                         if all(s == "wrong" for s in states):
-                            # 全員ミスのためラウンド決着
                             room.resolvedRound = reported_round
                             asyncio.create_task(proceed_to_next_round(room_id, reported_round))
                 except Exception as e: print(e)
                 continue
 
             # --------------------------------------------------
-            # 再戦 (RETRY) 受信時
+            # 再戦 (RETRY) 受信時 (強制開始防止・完全リセット版)
             # --------------------------------------------------
             if command == "RETRY":
                 if room_id not in room_retry_players:
                     room_retry_players[room_id] = set()
                 room_retry_players[room_id].add(player_id)
                 
+                # ★修正2: 全員の合意（2名）が取れたら完全に状態をリセットして開始
                 if len(room_retry_players[room_id]) >= room.playerCount:
                     room.status = "playing"
                     room.currentRound = 1
-                    room.resolvedRound = 0 # リセット
+                    room.resolvedRound = 0 # ★重要: これをリセットしないと次へ進めない
                     room.seed = str(uuid.uuid4())
                     room_retry_players[room_id].clear()
+                    
+                    # プレイヤーの状態も全員pendingに戻す
+                    if room_id in room_player_states:
+                        for pid in room_player_states[room_id]:
+                            room_player_states[room_id][pid] = "pending"
                     
                     await manager.broadcast("SERVER:MATCHED", room_id)
                     init_payload = json.dumps({"round": room.currentRound, "seed": room.seed})
                     await manager.broadcast(f"SERVER:NEXT_ROUND:{init_payload}", room_id)
                 else:
+                    # まだ全員揃っていない場合は単に通知をブロードキャストするだけ
                     await manager.broadcast(data, room_id)
                 continue
 
@@ -513,6 +512,10 @@ async def websocket_endpoint(
         manager.disconnect(websocket, room_id)
         if room_id in room_clients:
             room_clients[room_id].discard(player_id)
+            # ★追加: 切断したプレイヤーのRETRYフラグを消す (強制開始防止)
+            if room_id in room_retry_players:
+                room_retry_players[room_id].discard(player_id)
+
             if room_id in active_rooms:
                 room.playerCount = len(room_clients[room_id])
                 if room.playerCount == 1: room.status = "waiting"
