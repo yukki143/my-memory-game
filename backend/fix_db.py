@@ -2,28 +2,41 @@
 import os
 from dotenv import load_dotenv
 from sqlalchemy import text
-# app.database から engine をインポートすることで、
-# database.py に書かれた URL 変換ロジックをそのまま利用できます。
 from app.database import engine
 
 load_dotenv()
 
 def migrate():
-    # engine.begin() を使うことで、ブロック終了時に自動で COMMIT または ROLLBACK されます。
     print(f"Connecting to database to migrate...")
     try:
         with engine.begin() as conn:
-            # PostgreSQL 9.6以上であれば 'IF NOT EXISTS' が使用可能です。
-            # これにより、カラムが既に存在してもエラー（例外）を投げずに無視されます。
-            
-            print("Checking 'is_official' column...")
+            # --- memory_sets テーブルの修正 ---
+            print("Checking 'memory_sets' columns...")
             conn.execute(text(
                 "ALTER TABLE memory_sets ADD COLUMN IF NOT EXISTS is_official BOOLEAN DEFAULT FALSE;"
             ))
-            
-            print("Checking 'answer_time' column...")
             conn.execute(text(
                 "ALTER TABLE memory_sets ADD COLUMN IF NOT EXISTS answer_time INTEGER DEFAULT 10;"
+            ))
+            
+            # --- rankings テーブルの修正 (今回追加したロジック) ---
+            print("Checking 'rankings' columns...")
+            # エラーの原因である 'name' カラムを追加
+            conn.execute(text(
+                "ALTER TABLE rankings ADD COLUMN IF NOT EXISTS name VARCHAR;"
+            ))
+            # 他のカラムも念のため存在を確認し、なければ追加
+            conn.execute(text(
+                "ALTER TABLE rankings ADD COLUMN IF NOT EXISTS time FLOAT;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE rankings ADD COLUMN IF NOT EXISTS set_id VARCHAR;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE rankings ADD COLUMN IF NOT EXISTS win_score INTEGER;"
+            ))
+            conn.execute(text(
+                "ALTER TABLE rankings ADD COLUMN IF NOT EXISTS condition_type VARCHAR;"
             ))
             
         print("🎉 Migration completed successfully.")
