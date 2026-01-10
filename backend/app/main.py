@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -109,6 +109,15 @@ async def startup_event():
 
 app.include_router(memory_sets.router)
 
+# ゲスト/ログインユーザー兼用のためのオプショナルな取得関数
+def get_current_user_optional(db: Session = Depends(get_db), token: Optional[str] = None):
+    if not token:
+        return None
+    try:
+        return get_current_user(token, db)
+    except:
+        return None
+
 # --- CORS設定 ---
 origins = [
     "http://localhost:5173",
@@ -169,8 +178,6 @@ active_rooms: Dict[str, RoomInfo] = {}
 room_passwords: Dict[str, str] = {}
 room_owner_tokens: Dict[str, str] = {}
 room_clients: Dict[str, Set[str]] = {}
-
-# 対戦中の動的な状態管理
 room_player_states: Dict[str, Dict[str, str]] = {} 
 room_retry_players: Dict[str, Set[str]] = {}       
 
@@ -180,18 +187,29 @@ room_retry_players: Dict[str, Set[str]] = {}
 
 @app.get("/api/ranking", response_model=List[schemas.RankEntry])
 def get_ranking(set_id: str, win_score: int, condition_type: str, db: Session = Depends(get_db)):
-    results = db.query(models.Ranking).filter(
+    query = db.query(models.Ranking).filter(
         models.Ranking.set_id == set_id,
         models.Ranking.win_score == win_score,
         models.Ranking.condition_type == condition_type
-    ).order_by(models.Ranking.time.asc()).limit(10).all()
-    return results
+    )
+
+    if condition_type == "score":
+        query = query.order_by(models.Ranking.avg_speed.asc(), models.Ranking.created_at.desc())
+    else:
+        query = query.order_by(models.Ranking.accuracy.desc(), models.Ranking.created_at.desc())
+
+    return query.limit(10).all()
 
 @app.post("/api/ranking")
 def post_ranking(entry: schemas.RankEntry, db: Session = Depends(get_db)):
     new_rank = models.Ranking(
-        name=entry.name, time=entry.time, set_id=entry.set_id,
-        win_score=entry.win_score, condition_type=entry.condition_type
+        name=entry.name, 
+        time=entry.time, 
+        set_id=entry.set_id,
+        win_score=entry.win_score, 
+        condition_type=entry.condition_type,
+        accuracy=entry.accuracy,
+        avg_speed=entry.avg_speed
     )
     db.add(new_rank)
     db.commit()
@@ -239,7 +257,8 @@ def get_problem(
     seed: Optional[str] = None, 
     wrong_history: Optional[str] = None, 
     current_index: int = 0,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
     target_id = None
     if room_id and room_id in active_rooms:
@@ -282,12 +301,21 @@ def get_problem(
         idx = current_index % len(target_problems)
         correct = target_problems[idx]
     elif order_type == "review":
-        wrong_list = wrong_history.split(",") if wrong_history else []
-        weighted_pool = []
-        for p in target_problems:
-            weight = 5 if p["text"] in wrong_list else 1
-            weighted_pool.extend([p] * weight)
-        correct = rng.choice(weighted_pool)
+        if current_user:
+            stats = db.query(models.UserWordStat).filter(models.UserWordStat.user_id == current_user.id).all()
+            miss_map = {s.word_text: s.miss_count for s in stats}
+            weights = []
+            for p in target_problems:
+                weight = 1 + (miss_map.get(p["text"], 0) * 5)
+                weights.append(weight)
+            correct = rng.choices(target_problems, weights=weights, k=1)[0]
+        else:
+            wrong_list = wrong_history.split(",") if wrong_history else []
+            weighted_pool = []
+            for p in target_problems:
+                weight = 5 if p["text"] in wrong_list else 1
+                weighted_pool.extend([p] * weight)
+            correct = rng.choice(weighted_pool)
     else:
         correct = rng.choice(target_problems)
     
@@ -298,6 +326,30 @@ def get_problem(
     rng.shuffle(options)
     
     return {"correct": correct, "options": options}
+
+@app.post("/api/word_stats")
+def record_word_stat(word_text: str, is_correct: bool, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    stat = db.query(models.UserWordStat).filter(
+        models.UserWordStat.user_id == current_user.id,
+        models.UserWordStat.word_text == word_text
+    ).first()
+    
+    if not stat:
+        # ★修正: 初期値を明示的に0に設定し、NoneTypeへの加算エラーを回避
+        stat = models.UserWordStat(
+            user_id=current_user.id, 
+            word_text=word_text,
+            correct_count=0,
+            miss_count=0
+        )
+        db.add(stat)
+        
+    if is_correct:
+        stat.correct_count += 1
+    else:
+        stat.miss_count += 1
+    db.commit()
+    return {"status": "ok"}
 
 # ==========================
 #  ルーム管理 API
@@ -372,26 +424,18 @@ async def delayed_room_cleanup(room_id: str):
     finally: manager.cleanup_tasks.pop(room_id, None)
 
 # ==========================
-#  WebSocket 審判ロジック (同期修正版)
+#  WebSocket 審判ロジック
 # ==========================
 
 async def proceed_to_next_round(room_id: str, round_to_finish: int):
-    """
-    指定されたラウンドを終了し、少し待機してから次のラウンドへ進める。
-    """
     room = active_rooms.get(room_id)
-    # 二重実行防止
     if not room or room.currentRound != round_to_finish:
         return
 
-    # 演出用の待機 (1.5秒) 
     await asyncio.sleep(1.5)
-
-    # 次のラウンドの準備
     room.currentRound += 1
     room.seed = str(uuid.uuid4())
     
-    # 状態をリセット
     if room_id in room_player_states:
         for pid in room_player_states[room_id]:
             room_player_states[room_id][pid] = "pending"
@@ -426,8 +470,6 @@ async def websocket_endpoint(
     room_player_states[room_id][player_id] = "pending"
 
     try:
-        # ★修正1: 初回マッチング（currentRound == 0）の時のみ自動開始する
-        # これにより、一方が再接続しただけで勝手に再戦が始まるのを防ぐ
         if room.playerCount == 2 and room.status == "waiting" and room.currentRound == 0:
             room.status = "playing"
             room.currentRound = 1
@@ -444,13 +486,9 @@ async def websocket_endpoint(
             sender_id = parts[0]
             command = parts[1] if len(parts) > 1 else ""
 
-            # --------------------------------------------------
-            # 正解 (SCORE_UP) 受信時
-            # --------------------------------------------------
             if command.startswith("SCORE_UP:round"):
                 try:
                     reported_round = int(command.replace("SCORE_UP:round", ""))
-                    # ★修正: 現在のラウンドかつ、まだ決着していない場合のみ受理
                     if reported_round == room.currentRound and reported_round > room.resolvedRound:
                         room.resolvedRound = reported_round
                         await manager.broadcast(data, room_id)
@@ -459,9 +497,6 @@ async def websocket_endpoint(
                 except Exception as e: print(e)
                 continue
 
-            # --------------------------------------------------
-            # ミス (MISS) 受信時
-            # --------------------------------------------------
             if command.startswith("MISS:round"):
                 try:
                     reported_round = int(command.replace("MISS:round", ""))
@@ -476,22 +511,31 @@ async def websocket_endpoint(
                 continue
 
             # --------------------------------------------------
-            # 再戦 (RETRY) 受信時 (強制開始防止・完全リセット版)
+            # 再戦 (RETRY) 受信時 (修正版)
             # --------------------------------------------------
             if command == "RETRY":
+                if room.playerCount < 2:
+                    await websocket.send_text(f"SERVER:ERROR:相手がいないため再戦できません")
+                    continue
+
                 if room_id not in room_retry_players:
                     room_retry_players[room_id] = set()
                 room_retry_players[room_id].add(player_id)
                 
-                # ★修正2: 全員の合意（2名）が取れたら完全に状態をリセットして開始
-                if len(room_retry_players[room_id]) >= room.playerCount:
+                # ★修正: 2人目であっても、まずは「リトライボタンが押された」ことを全員に通知する
+                # これにより、一人が待機状態のまま固まるのを防ぐ
+                await manager.broadcast(data, room_id)
+                
+                if len(room_retry_players[room_id]) >= 2:
+                    # ★修正: フロントエンドの状態リセット時間を確保するため、極短いディレイを挟む
+                    await asyncio.sleep(0.5)
+
                     room.status = "playing"
                     room.currentRound = 1
-                    room.resolvedRound = 0 # ★重要: これをリセットしないと次へ進めない
+                    room.resolvedRound = 0
                     room.seed = str(uuid.uuid4())
                     room_retry_players[room_id].clear()
                     
-                    # プレイヤーの状態も全員pendingに戻す
                     if room_id in room_player_states:
                         for pid in room_player_states[room_id]:
                             room_player_states[room_id][pid] = "pending"
@@ -499,9 +543,6 @@ async def websocket_endpoint(
                     await manager.broadcast("SERVER:MATCHED", room_id)
                     init_payload = json.dumps({"round": room.currentRound, "seed": room.seed})
                     await manager.broadcast(f"SERVER:NEXT_ROUND:{init_payload}", room_id)
-                else:
-                    # まだ全員揃っていない場合は単に通知をブロードキャストするだけ
-                    await manager.broadcast(data, room_id)
                 continue
 
             await manager.broadcast(data, room_id)
@@ -512,18 +553,21 @@ async def websocket_endpoint(
         manager.disconnect(websocket, room_id)
         if room_id in room_clients:
             room_clients[room_id].discard(player_id)
-            # ★追加: 切断したプレイヤーのRETRYフラグを消す (強制開始防止)
             if room_id in room_retry_players:
                 room_retry_players[room_id].discard(player_id)
 
             if room_id in active_rooms:
-                room.playerCount = len(room_clients[room_id])
-                if room.playerCount == 1: room.status = "waiting"
+                target_room = active_rooms[room_id]
+                target_room.playerCount = len(room_clients[room_id])
+                if target_room.playerCount == 1:
+                    target_room.status = "waiting"
                 if room_id in room_player_states:
                     room_player_states[room_id].pop(player_id, None)
-                if room.playerCount <= 0:
+                if target_room.playerCount <= 0:
                     task = asyncio.create_task(delayed_room_cleanup(room_id))
                     manager.cleanup_tasks[room_id] = task
+                else:
+                    await manager.broadcast(f"SERVER:OPPONENT_LEFT", room_id)
 
 # 静的ファイルの配信設定
 frontend_path = os.path.join(os.getcwd(), "../frontend/dist")
