@@ -73,6 +73,7 @@ function BattleMode() {
   
   // 演出・同期用ステート
   const [roundResult, setRoundResult] = useState<'correct' | 'wrong' | null>(null);
+  const [roundWinnerId, setRoundWinnerId] = useState<string | null>(null); // ★追加: ラウンド勝者を管理
   const [iMissed, setIMissed] = useState(false);
   const [opponentMissed, setOpponentMissed] = useState(false);
   const [startTime, setStartTime] = useState(0);
@@ -130,8 +131,9 @@ function BattleMode() {
               
               setRoundNumber(data.round);
               setServerSeed(data.seed);
-              // ラウンド開始時に演出とミス状態をリセット
+              // ラウンド開始時に演出とミス状態、勝者情報をリセット
               setRoundResult(null);
+              setRoundWinnerId(null);
               setIMissed(false);
               setOpponentMissed(false);
             } catch (e) { console.error("NEXT_ROUND parse error", e); }
@@ -149,6 +151,8 @@ function BattleMode() {
             if (senderId !== playerId) setOpponentName(command.substring(5));
           }
           else if (command.startsWith("SCORE_UP")) {
+            // ★修正: 誰かが正解した瞬間に勝者IDをセットしてロックを開始
+            setRoundWinnerId(senderId);
             if (senderId === playerId) {
               setRoundResult('correct');
             } else {
@@ -217,6 +221,7 @@ function BattleMode() {
     setIMissed(false);
     setOpponentMissed(false);
     setRoundResult(null);
+    setRoundWinnerId(null); // 追加
     setIsRetryReady(false);
     setOpponentRetryReady(false);
     setMissedProblems([]);
@@ -231,13 +236,15 @@ function BattleMode() {
   };
 
   const addScore = () => {
-    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct') return;
+    // ★修正: すでに誰かが正解している場合は送信しない
+    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     setMyScore(prev => prev + 1);
     wsSend(`SCORE_UP:round${roundNumber}`); 
   };
 
   const sendMiss = (problem?: Problem) => {
-    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct') return;
+    // ★修正: すでに誰かが正解している場合は送信しない
+    if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     if (problem) setMissedProblems(prev => [...prev, problem]);
     wsSend(`MISS:round${roundNumber}`);
   };
@@ -265,6 +272,9 @@ function BattleMode() {
   }, [gameStatus]);
 
   const showHUD = gameStatus === 'countdown' || gameStatus === 'playing';
+
+  // ★修正: 入力ロックの条件を「自分がミスした」or「自分が正解した」or「相手を含め誰かが正解した」に拡大
+  const isInputLocked = iMissed || roundResult === 'correct' || !!roundWinnerId;
 
   return (
     <div className={`relative w-screen flex flex-col items-center justify-center p-4 overflow-x-hidden
@@ -297,8 +307,8 @@ function BattleMode() {
           </div>
       )}
 
-      {/* 待機用オーバーレイ */}
-      {iMissed && !opponentMissed && gameStatus === 'playing' && (
+      {/* 待機用オーバーレイ (自分がミスして、まだ相手が決着をつけていない時) */}
+      {iMissed && !roundWinnerId && gameStatus === 'playing' && (
           <div className="fixed inset-0 z-[60] bg-black/50 flex flex-col items-center justify-center animate-fade-in">
               <div className="text-xl font-bold text-white animate-pulse">相手の回答を待っています...</div>
           </div>
@@ -343,7 +353,7 @@ function BattleMode() {
                                       roomId={roomId} playerId={playerId} setId={memorySetId}
                                       seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)}
                                       totalAttempted={roundNumber}
-                                      isLocked={iMissed || roundResult === 'correct'} // 入力ロックを渡す
+                                      isLocked={isInputLocked} // 入力ロックを渡す
                                     /> 
                                 ) : (
                                     <GamePC 
@@ -351,7 +361,7 @@ function BattleMode() {
                                         roomId={roomId} playerId={playerId} setId={memorySetId}
                                         settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)}
                                         totalAttempted={roundNumber}
-                                        isLocked={iMissed || roundResult === 'correct'} // 入力ロックを渡す
+                                        isLocked={isInputLocked} // 入力ロックを渡す
                                     />
                                 )}
                             </div>

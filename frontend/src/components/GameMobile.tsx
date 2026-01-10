@@ -12,7 +12,7 @@ type ApiResponse = {
 
 type Props = {
   onScore: () => void;
-  onWrong: (problem?: Problem) => void; // オプショナルに修正
+  onWrong: (problem?: Problem) => void;
   resetKey: number;
   isSoloMode?: boolean;
   roomId?: string;
@@ -22,7 +22,7 @@ type Props = {
   settings?: GameSettings; 
   wrongHistory?: string[];
   totalAttempted?: number;
-  isLocked?: boolean; // 追加
+  isLocked?: boolean; 
 };
 
 type SlotItem = { text: string; sourceId: number; } | null;
@@ -123,7 +123,7 @@ function GameMobile({
   }, [resetKey, loadProblem]);
 
   useEffect(() => {
-    if (gameState === 'memorize' && !isFetching) {
+    if (gameState === 'memorize' && !isFetching && !isLocked) {
         if (timeLeft > 0) {
             const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
@@ -131,7 +131,7 @@ function GameMobile({
             setGameState('quiz');
         }
     }
-  }, [gameState, timeLeft, isFetching]);
+  }, [gameState, timeLeft, isFetching, isLocked]);
 
   useEffect(() => {
     if (gameState === 'quiz' && !isProcessing.current && !isFetching && !isLocked) {
@@ -139,7 +139,6 @@ function GameMobile({
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            // タイムアウト
             if (!isProcessing.current) {
                 isProcessing.current = true;
                 setGameState('waiting');
@@ -215,7 +214,10 @@ function GameMobile({
               <div 
                 key={`memorize-${resetKey}`}
                 className="h-full bg-orange-500" 
-                style={{ animation: `shrink-mobile ${MEMORIZE_TIME}s linear forwards` }}
+                style={{ 
+                    animation: `shrink-mobile ${MEMORIZE_TIME}s linear forwards`,
+                    animationPlayState: isLocked ? 'paused' : 'running'
+                }}
               />
             </div>
           )}
@@ -226,7 +228,10 @@ function GameMobile({
               <div 
                 key={`answer-bar-${resetKey}`}
                 className="h-full bg-red-500"
-                style={{ animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` }}
+                style={{ 
+                    animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards`,
+                    animationPlayState: isLocked ? 'paused' : 'running'
+                }}
               />
             </div>
           )}
@@ -254,7 +259,7 @@ function GameMobile({
                                 className={`relative w-full p-3 rounded-xl border-4 font-bold text-xl min-h-[60px] transition-all 
                                     ${slot ? 'bg-white border-[#8d6e63] text-[#5d4037]' : 'bg-black/5 border-dashed border-gray-400 text-gray-400'}`}
                             >
-                                {slot ? slot.text : <span className="text-sm opacity-50">ここをタップして配置</span>}
+                                {slot ? slot.text : <span className="text-sm opacity-50">{isLocked ? "判定中" : "タップして配置"}</span>}
                                 <div className="absolute top-0 left-0 text-[10px] bg-[#d7ccc8] px-1 text-[#5d4037]">{i + 1}</div>
                             </button>
                         ))}

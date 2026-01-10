@@ -7,7 +7,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 type GamePCProps = {
   onScore?: () => void;
-  onWrong?: (problem?: Problem) => void; // 引数をオプショナルに変更
+  onWrong?: (problem?: Problem) => void;
   onTypo?: (expectedChar: string) => void;
   resetKey: number;
   settings?: GameSettings;
@@ -18,7 +18,7 @@ type GamePCProps = {
   wrongHistory?: string[];
   totalAttempted?: number;
   isSoloMode?: boolean;
-  isLocked?: boolean; // 追加
+  isLocked?: boolean; 
 };
 
 type ApiResponse = {
@@ -38,7 +38,6 @@ export default function GamePC({
   const [gameState, setGameState] = useState<'memorize' | 'answer' | 'waiting'>('waiting');
   const [problems, setProblems] = useState<Problem[]>([]);
   const [inputVals, setInputVals] = useState<string[]>([]);
-  const [results, setResults] = useState<(boolean | null)[]>([]);
   const [isError, setIsError] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(MEMORIZE_TIME);
   const [answerTimeLeft, setAnswerTimeLeft] = useState<number>(ANSWER_TIME);
@@ -52,12 +51,11 @@ export default function GamePC({
   const wrongHistoryRef = useRef(wrongHistory);
   const inputRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
 
-  // 1. 自動フォーカス処理: 回答フェーズに入ったら最初のtextareaにフォーカス
   useEffect(() => {
-    if (gameState === 'answer' && inputRefs.current[0]) {
+    if (gameState === 'answer' && inputRefs.current[0] && !isLocked) {
       inputRefs.current[0].focus();
     }
-  }, [gameState]);
+  }, [gameState, isLocked]);
 
   useEffect(() => {
     isProcessing.current = true;
@@ -93,7 +91,6 @@ export default function GamePC({
 
         setProblems(newProblems);
         setInputVals(Array(splitCount).fill(""));
-        setResults(Array(splitCount).fill(null));
         setIsError(false);
         setTimeLeft(MEMORIZE_TIME);
         setAnswerTimeLeft(ANSWER_TIME);
@@ -113,7 +110,7 @@ export default function GamePC({
   }, [resetKey, loadProblem]);
 
   useEffect(() => {
-    if (gameState === 'memorize' && !isFetching) {
+    if (gameState === 'memorize' && !isFetching && !isLocked) {
         if (timeLeft > 0) {
             const timer = setTimeout(() => setTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
@@ -121,7 +118,7 @@ export default function GamePC({
             setGameState('answer');
         }
     }
-  }, [gameState, timeLeft, isFetching]);
+  }, [gameState, timeLeft, isFetching, isLocked]);
 
   useEffect(() => {
     if (gameState === 'answer' && !isProcessing.current && !isFetching && !isLocked) {
@@ -129,7 +126,6 @@ export default function GamePC({
             const timer = setTimeout(() => setAnswerTimeLeft(prev => prev - 1), 1000);
             return () => clearTimeout(timer);
         } else {
-            // 2. タイムアウト時の処理
             handleEnterKey(true);
         }
     }
@@ -138,7 +134,6 @@ export default function GamePC({
   const handleAllCorrect = () => {
       if (isProcessing.current || gameState === 'waiting' || isLocked) return; 
       playSE('/sounds/se_correct.mp3');
-      setResults(Array(splitCount).fill(true));
       isProcessing.current = true;
       setGameState('waiting');
       if (onScore) onScore();
@@ -151,7 +146,6 @@ export default function GamePC({
       if (isAllCorrect && !isTimeout) {
           handleAllCorrect();
       } else {
-          // 誤答またはタイムアウト
           playSE('/sounds/se_wrong.mp3');
           setGameState('waiting');
           isProcessing.current = true;
@@ -174,12 +168,10 @@ export default function GamePC({
         setInputVals(newVals);
         setIsError(false);
 
-        const isCurrentDone = val === targetProblem.text;
         const isAllCorrect = problems.every((p, i) => (i === index ? val : newVals[i]) === p.text);
-
         if (isAllCorrect) {
           handleAllCorrect();
-        } else if (isCurrentDone) {
+        } else if (val === targetProblem.text) {
           const nextInput = inputRefs.current[index + 1];
           if (nextInput) nextInput.focus();
         }
@@ -203,7 +195,12 @@ export default function GamePC({
           <div className="flex flex-col w-full h-full">
               <div className="w-full h-2 bg-gray-300 rounded-full mb-2 overflow-hidden relative">
                   <style>{`@keyframes shrink-width { from { width: 100%; } to { width: 0%; } }`}</style>
-                  <div key={resetKey} className="h-full bg-orange-500" style={{ animation: `shrink-width ${MEMORIZE_TIME}s linear forwards` }} />
+                  <div key={resetKey} className="h-full bg-orange-500" 
+                    style={{ 
+                      animation: `shrink-width ${MEMORIZE_TIME}s linear forwards`,
+                      animationPlayState: isLocked ? 'paused' : 'running'
+                    }} 
+                  />
               </div>
               <div className={`grid gap-6 w-full h-full items-center justify-center ${splitCount === 1 ? "grid-cols-1" : splitCount <= 4 ? "grid-cols-2" : "grid-cols-3"}`}>
                   {problems.map((p, idx) => (
@@ -216,10 +213,16 @@ export default function GamePC({
           </div>
         )}
 
+        {/* 解答フェーズ。isLockedまたはwaiting時はタイマーを停止 */}
         {gameState === 'answer' && (
           <div className="absolute top-0 left-0 w-full h-1 bg-gray-200 z-50">
             <style>{`@keyframes shrink-answer-bar { from { width: 100%; } to { width: 0%; } }`}</style>
-            <div key={`answer-bar-${resetKey}`} className="h-full bg-red-500" style={{ animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards` }} />
+            <div key={`answer-bar-${resetKey}`} className="h-full bg-red-500" 
+              style={{ 
+                animation: `shrink-answer-bar ${ANSWER_TIME}s linear forwards`,
+                animationPlayState: isLocked ? 'paused' : 'running'
+              }} 
+            />
           </div>
         )}
 
@@ -232,7 +235,7 @@ export default function GamePC({
                   disabled={gameState === 'waiting' || isFetching || isLocked}
                   className={`flex-1 bg-transparent rounded-xl p-4 pt-8 text-center resize-none outline-none w-full font-black text-[#5d4037] text-4xl ${isError ? 'animate-shake text-red-500' : ''}`}
                   style={{ caretColor: '#8d6e63' }} 
-                  placeholder={isLocked ? "待機中..." : "タイプ..."}
+                  placeholder={isLocked ? "判定中..." : "タイプ..."}
                   value={inputVals[idx] || ""}
                   onChange={(e) => handleInputChange(idx, e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleEnterKey(); } }}
