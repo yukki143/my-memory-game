@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import ForestPath from './ForestPath';
 import { type RoomInfo } from '../types';
 import { authFetch } from '../utils/auth';
+import { useBgm } from '../context/BgmContext';
+import { useSound } from '../hooks/useSound';
 
 // APIの場所 (環境に合わせて変更してください)
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -14,10 +16,15 @@ type MemorySetOption = {
 
 export default function BattleLobby() {
   const navigate = useNavigate();
+  const { setBgm } = useBgm();
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [playerName, setPlayerName] = useState("Loading...");
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
+
   
   // ルーム作成フォーム用
   const [newRoomName, setNewRoomName] = useState("");
@@ -33,6 +40,7 @@ export default function BattleLobby() {
 
   // 初回ロード時にルーム一覧とセット一覧を取得
   useEffect(() => {
+    setBgm('lobby', false); 
     fetchRooms();
     fetchMemorySets();
     loadOwnedRooms();
@@ -41,7 +49,7 @@ export default function BattleLobby() {
     // 3秒ごとにポーリング（自動更新）
     const interval = setInterval(fetchRooms, 3000); 
     return () => clearInterval(interval);
-  }, []);
+  }, [setBgm]);
 
   const fetchMyProfile = async () => {
     try {
@@ -244,7 +252,7 @@ export default function BattleLobby() {
       <div className="fixed inset-0 pointer-events-none"><ForestPath overlayOpacity={0.2} /></div>
 
       <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 shadow-md border-b-4 border-[#8d6e63]">
-        <button onClick={() => navigate('/')} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
+        <button onClick={() => { click(); navigate('/')}} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
           ← ホームに戻る
         </button>
         <h1 className="text-lg md:text-2xl font-black whitespace-nowrap text-center mx-2">
@@ -263,7 +271,7 @@ export default function BattleLobby() {
         </div>
 
         <button 
-            onClick={() => setShowModal(true)}
+            onClick={() => { click(); setShowModal(true)}}
             className="w-full py-4 theme-flower-btn rounded-2xl font-black text-xl shadow-lg transform transition hover:scale-105"
         >
             ＋ 新しいルームを作る
@@ -273,7 +281,7 @@ export default function BattleLobby() {
             <div className="flex justify-between items-end mb-2 px-2">
                 <h2 className="text-xl font-bold text-white drop-shadow-md">現在のルーム一覧</h2>
                 <button 
-                    onClick={fetchRooms} 
+                    onClick={() => { click(); fetchRooms();}} 
                     className="text-sm bg-white/80 px-3 py-1 rounded-full font-bold hover:bg-white transition flex items-center gap-1"
                 >
                     🔄 更新
@@ -299,7 +307,7 @@ export default function BattleLobby() {
                                     
                                     {(myOwnedRooms.includes(room.id) || room.playerCount === 0) && (
                                         <button 
-                                            onClick={() => handleDeleteRoom(room.id, room.playerCount === 0)}
+                                            onClick={() => { click(); handleDeleteRoom(room.id, room.playerCount === 0)}}
                                             className="text-xs bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded font-bold hover:bg-red-200"
                                         >
                                             {room.playerCount === 0 ? "掃除 🧹" : "削除 🗑️"}
@@ -323,7 +331,7 @@ export default function BattleLobby() {
                                     </button>
                                 ) : (
                                     <button 
-                                        onClick={() => joinGame(room)}
+                                        onClick={() => { click(); joinGame(room)}}
                                         className="w-full py-2 theme-leaf-btn font-bold rounded-lg shadow-sm transform group-hover:scale-105 transition"
                                     >
                                         参加する
@@ -376,14 +384,16 @@ export default function BattleLobby() {
                         <div className="flex flex-col gap-3">
                             <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden w-full">
                                 <button 
-                                    onClick={() => setConditionType('score')}
+                                    type="button"
+                                    onClick={() => { click(); setConditionType('score')}}
                                     className={`flex-1 py-2 font-bold transition text-sm ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
                                 >
                                     正解数
                                 </button>
                                 <div className="w-[2px] bg-[#d7ccc8]"></div>
                                 <button 
-                                    onClick={() => setConditionType('total')}
+                                    type="button"
+                                    onClick={() => { click(); setConditionType('total')}}
                                     className={`flex-1 py-2 font-bold transition text-sm ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
                                 >
                                     出題数
@@ -407,13 +417,15 @@ export default function BattleLobby() {
 
                 <div className="flex gap-3 mt-8 pt-4 border-t-2 border-[#d7ccc8]">
                     <button 
-                        onClick={() => setShowModal(false)} 
+                        type="button"
+                        onClick={() => { click(); setShowModal(false)}} 
                         className="flex-1 py-3 bg-gray-200 font-bold rounded-xl text-gray-600 hover:bg-gray-300 transition"
                     >
                         キャンセル
                     </button>
                     <button 
-                        onClick={handleCreateRoom} 
+                        type="button"
+                        onClick={() => { click(); handleCreateRoom();}} 
                         disabled={isLoading}
                         className="flex-1 py-3 theme-leaf-btn font-bold rounded-xl shadow-md transform active:scale-95 transition flex justify-center items-center"
                     >

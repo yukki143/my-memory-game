@@ -7,6 +7,7 @@ import ForestPath from './ForestPath';
 import { DEFAULT_SETTINGS, type Problem } from '../types';
 import { useSound } from '../hooks/useSound';
 import { authFetch, getToken } from '../utils/auth';
+import { useBgm } from '../context/BgmContext';
 
 type MobileScoreBoardProps = {
   myScore: number;
@@ -56,6 +57,13 @@ function BattleMode() {
   const WINNING_SCORE = settings.clearConditionValue || 10;
   const CONDITION_TYPE = settings.conditionType || 'score';
   const { playSE } = useSound();
+  const COUNT_SE = '/sounds/se_countdown.mp3';
+  const countdownSePlayedRef = useRef(false);
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
+
+  // ★ 追加: BGM制御
+  const { setBgm, resetBgm } = useBgm();
 
   const [isConnected, setIsConnected] = useState(false);
   const [gameStatus, setGameStatus] = useState<'waiting' | 'countdown' | 'playing' | 'finished'>('waiting');
@@ -89,6 +97,28 @@ function BattleMode() {
   const socketRef = useRef<WebSocket | null>(null);
   const roundNumberRef = useRef(0); 
   const retryRequestedRef = useRef(false);
+
+  // ★ 追加: Battleの状態に応じてBGMシーン/停止を更新
+  useEffect(() => {
+    // waiting〜countdown は lobby BGM
+    if (gameStatus === 'waiting' || gameStatus === 'countdown') {
+      setBgm('lobby', false);
+      return;
+    }
+
+    // playing は battle BGM
+    if (gameStatus === 'playing') {
+      setBgm('battle', false);
+      return;
+    }
+
+    // finished はBGM停止（battleのまま止める）
+    if (gameStatus === 'finished') {
+      setBgm('battle', true);
+      return;
+    }
+  }, [gameStatus, setBgm]);
+
 
   useEffect(() => {
     roundNumberRef.current = roundNumber;
@@ -236,7 +266,7 @@ function BattleMode() {
     // ★重要: ここに gameStatus や isRetryReady を入れてはいけない
   }, [roomId, playerId, playerName, memorySetId]);
 
-  const startCountdown = () => { setGameStatus('countdown'); setCountdownValue(3); };
+  const startCountdown = () => { countdownSePlayedRef.current = false; setGameStatus('countdown'); setCountdownValue(3); };
 
   const recordStat = async (wordText: string, isCorrect: boolean) => {
     if (!getToken()) return;
@@ -344,6 +374,18 @@ function BattleMode() {
     }
   }, [gameStatus]);
 
+  useEffect(() => {
+    if (gameStatus === 'countdown') {
+      if (!countdownSePlayedRef.current) {
+        playSE(COUNT_SE);                 // ★ここで1回だけ鳴る
+        countdownSePlayedRef.current = true;
+      }
+    } else {
+      // countdown を抜けたら次回のためにリセット
+      countdownSePlayedRef.current = false;
+    }
+  }, [gameStatus, playSE]);
+
   const showHUD = gameStatus === 'countdown' || gameStatus === 'playing';
   const isInputLocked = iMissed || roundResult === 'correct' || !!roundWinnerId;
 
@@ -356,7 +398,7 @@ function BattleMode() {
         ${isMobile && gameStatus === 'finished' ? 'min-h-screen overflow-y-auto' : 'h-screen overflow-hidden'}`}>
       <div className="fixed inset-0 bg-green-100 -z-20" />
       <div className="fixed inset-0 -z-10"><ForestPath overlayOpacity={0.2} /></div>
-      <button onClick={() => navigate('/')} className="fixed top-4 left-4 z-[100] theme-wood-btn px-6 py-3 flex items-center gap-2 font-bold text-sm md:text-base cursor-pointer">
+      <button onClick={() => { click(); navigate('/')}} className="fixed top-4 left-4 z-[100] theme-wood-btn px-6 py-3 flex items-center gap-2 font-bold text-sm md:text-base cursor-pointer">
         <span>←</span> <span>もどる</span>
       </button>
 
@@ -412,7 +454,7 @@ function BattleMode() {
                                 {isMobile ? (
                                     <GameMobile onScore={addScore} onWrong={sendMiss} resetKey={roundNumber} roomId={roomId} playerId={playerId} setId={memorySetId} seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)} totalAttempted={roundNumber} isLocked={isInputLocked} /> 
                                 ) : (
-                                    <GamePC onScore={addScore} onWrong={sendMiss} onTypo={handleTypo} resetKey={roundNumber} roomId={roomId} playerId={playerId} setId={memorySetId} settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)} totalAttempted={roundNumber} isLocked={isInputLocked} />
+                                    <GamePC onScore={addScore} onWrong={sendMiss} onTypo={handleTypo} isSoloMode resetKey={roundNumber} roomId={roomId} playerId={playerId} setId={memorySetId} settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)} totalAttempted={roundNumber} isLocked={isInputLocked} />
                                 )}
                             </div>
                         </div>
@@ -469,7 +511,7 @@ function BattleMode() {
                                     <div className="text-2xl font-bold text-[#8d6e63] mb-2 font-hakoniwa">連続勝利数 👑</div><div className="text-6xl font-black text-[#d97706]">{winStreak}</div>
                                 </div>
                                 <div className="mt-6 mb-6 w-full flex justify-center">
-                                    {!isOpponentPresent ? ( <div className="px-6 py-4 bg-gray-100 rounded-xl font-bold text-gray-400 border-2 border-dashed border-gray-300 w-full text-center">対戦相手が退出しました</div> ) : isRetryReady && !opponentRetryReady ? ( <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div> ) : ( <button onClick={handleRetry} className="theme-leaf-btn py-4 rounded-xl font-black text-xl shadow-lg w-full max-w-xs transition transform hover:scale-105">再戦する！</button> )}
+                                    {!isOpponentPresent ? ( <div className="px-6 py-4 bg-gray-100 rounded-xl font-bold text-gray-400 border-2 border-dashed border-gray-300 w-full text-center">対戦相手が退出しました</div> ) : isRetryReady && !opponentRetryReady ? ( <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div> ) : ( <button onClick={() => { click(); handleRetry();}} className="theme-leaf-btn py-4 rounded-xl font-black text-xl shadow-lg w-full max-w-xs transition transform hover:scale-105">再戦する！</button> )}
                                 </div>
                             </div>
                         </div>

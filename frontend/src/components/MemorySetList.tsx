@@ -5,6 +5,7 @@ import { authFetch } from '../utils/auth';
 import ForestPath from './ForestPath';
 import { type MemorySet } from '../types';
 import { DEFAULT_SETTINGS } from '../types';
+import { useSound } from '../hooks/useSound';
 
 // 公式テンプレート (固定データ)
 // ★修正: IDをバックエンドの DEFAULT_MEMORY_SETS と一致させる
@@ -17,6 +18,8 @@ const OFFICIAL_SETS: MemorySet[] = [
 
 export default function MemorySetList() {
   const navigate = useNavigate();
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
   const [mySets, setMySets] = useState<MemorySet[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,11 +45,13 @@ export default function MemorySetList() {
 
   // 編集画面へ遷移
   const handleEdit = (id: string | number) => {
+    playSE(CLICK_SE);
     navigate(`/edit-set/${id}`);
   };
 
   // ソロプレイ開始処理
   const handlePlaySolo = (set: MemorySet) => {
+    playSE(CLICK_SE);
     // セットに含まれる設定を取り出し、なければデフォルトを使う
     const settings = {
         ...DEFAULT_SETTINGS,
@@ -70,7 +75,7 @@ export default function MemorySetList() {
       <div className="fixed inset-0 pointer-events-none"><ForestPath overlayOpacity={0.2} /></div>
 
       <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 shadow-md border-b-4 border-[#8d6e63]">
-        <button onClick={() => navigate('/')} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
+        <button onClick={() => {playSE(CLICK_SE); navigate('/')}} className="font-bold underline hover:text-[#8d6e63]/70 text-xs md:text-base whitespace-nowrap">
           ← ホームに戻る
         </button>
         
@@ -85,7 +90,7 @@ export default function MemorySetList() {
         
         {/* 新規作成ボタン */}
         <button 
-          onClick={() => navigate('/create-set')}
+          onClick={() => {playSE(CLICK_SE); navigate('/create-set')}}
           className="w-full py-4 theme-leaf-btn rounded-2xl font-black text-xl shadow-lg transform transition hover:scale-105 flex items-center justify-center gap-2"
         >
           <span>＋</span><span>新しいメモリーセットを作る</span>
@@ -94,7 +99,7 @@ export default function MemorySetList() {
         {/* 自分のメモリーセット */}
         <section>
           <h2 className="text-xl font-bold mb-4 px-2 flex items-center gap-2">
-            <span>🌾</span> 自分のガーデン
+            <span>🌾</span> マイガーデン
           </h2>
           <div className="grid gap-3">
               {mySets.length === 0 && !loading && (

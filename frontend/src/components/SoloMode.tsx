@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import GamePC from './GamePC';
 import GameMobile from './GameMobile';
@@ -6,6 +6,7 @@ import ForestPath from './ForestPath';
 import { DEFAULT_SETTINGS, type Problem } from '../types';
 import { authFetch, getToken } from '../utils/auth';
 import { useSound } from '../hooks/useSound';
+import { useBgm } from '../context/BgmContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
@@ -45,8 +46,35 @@ function SoloMode({ onBack }: { onBack: () => void }) {
   const { playSE } = useSound();
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
+  // ★ 追加: BGM制御
+  const { setBgm, resetBgm } = useBgm();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
+
+
   const MEMORIZE_TIME_SEC = settings.memorizeTime ?? 3;
   const POST_ANSWER_DELAY = 0.5; // この秒数だけ〇✕が表示されます
+
+  // ★ 追加: Soloのゲーム状態に応じてBGMシーン/停止を更新
+  useEffect(() => {
+    // ready〜countdown は lobby BGM（カウントダウン中も lobby）
+    if (gameState === 'ready' || gameState === 'countdown') {
+      setBgm('lobby', false);
+      return;
+    }
+
+    // playing に入った瞬間に solo BGM
+    if (gameState === 'playing') {
+      setBgm('solo', false);
+      return;
+    }
+
+    // finished（結果表示）ではBGM停止（曲種はsoloのままでOK）
+    if (gameState === 'finished') {
+      setBgm('solo', true);
+      return;
+    }
+  }, [gameState, setBgm]);
 
   useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth < 768);
@@ -98,6 +126,21 @@ function SoloMode({ onBack }: { onBack: () => void }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState]);
 
+  const COUNT_SE = '/sounds/se_countdown.mp3';
+  const countdownSePlayedRef = useRef(false);
+
+  useEffect(() => {
+  if (gameState === 'countdown') {
+    if (!countdownSePlayedRef.current) {
+      playSE(COUNT_SE);                 // ★ここで1回だけ鳴る
+      countdownSePlayedRef.current = true;
+    }
+  } else {
+    // countdown を抜けたら次回のためにリセット
+    countdownSePlayedRef.current = false;
+  }
+}, [gameState, playSE]);
+
   useEffect(() => {
     if (gameState === 'countdown') {
       if (countdownValue > 0) {
@@ -109,7 +152,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
         setResetKey(1); 
       }
     }
-  }, [gameState, countdownValue]);
+  }, [gameState, countdownValue, playSE]);
 
   const recordStat = async (wordText: string, isCorrect: boolean) => {
     if (!getToken()) return;
@@ -269,7 +312,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
       <div className="absolute inset-0 -z-10"><ForestPath overlayOpacity={0.2}/></div>
 
       <div className="absolute top-4 left-4 z-50">
-        <button onClick={onBack} className="theme-wood-btn px-6 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2">
+        <button onClick={() => { click(); onBack();}} className="theme-wood-btn px-6 py-3 rounded-xl text-sm font-bold shadow-lg flex items-center gap-2">
           <span>←</span> <span>もどる</span>
         </button>
       </div>
@@ -297,7 +340,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
                 <p className="text-sm font-bold mb-1 opacity-70">Challenger</p>
                 <p className="text-3xl font-black text-[#5d4037]">{playerName}</p>
               </div>
-              <button onClick={startCountdown} className="theme-leaf-btn text-2xl font-black py-4 px-16 rounded-full shadow-xl">スタート</button>
+              <button onClick={() => { click();startCountdown();}} className="theme-leaf-btn text-2xl font-black py-4 px-16 rounded-full shadow-xl">スタート</button>
             </div>
           </div>
         )}
@@ -367,8 +410,8 @@ function SoloMode({ onBack }: { onBack: () => void }) {
                 </div>
 
                 <div className="mb-6 flex gap-4">
-                  <button onClick={submitScore} className="theme-leaf-btn py-3 px-8 rounded-xl font-black shadow-lg">ランキング登録</button>
-                  <button onClick={() => setGameState('ready')} className="theme-wood-btn py-3 px-8 rounded-xl font-black shadow-lg">リトライ</button>
+                  <button onClick={() => { click(); submitScore();}} className="theme-leaf-btn py-3 px-8 rounded-xl font-black shadow-lg">ランキング登録</button>
+                  <button onClick={() => { click(); setGameState('ready')}} className="theme-wood-btn py-3 px-8 rounded-xl font-black shadow-lg">リトライ</button>
                 </div>
 
                 <div className="w-full flex-1 bg-[#fff8e1] rounded-xl p-3 overflow-y-auto border-4 border-[#d4a373]">

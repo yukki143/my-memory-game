@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { authFetch } from '../utils/auth';
 import ForestPath from './ForestPath';
+import { useSound } from '../hooks/useSound';
 
 type WordItem = {
   text: string;
@@ -11,6 +12,9 @@ type WordItem = {
 
 export default function CreateMemorySet() {
   const navigate = useNavigate();
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
   const { id } = useParams();
   const isEditMode = Boolean(id);
 
@@ -133,9 +137,9 @@ export default function CreateMemorySet() {
       <div className="fixed inset-0 pointer-events-none"><ForestPath overlayOpacity={0.2} /></div>
 
       <header className="w-full p-4 flex justify-between items-center z-10 bg-white/80 backdrop-blur-md shadow-md border-b-4 border-[#8d6e63]">
-        <button onClick={() => navigate('/memory-sets')} className="font-bold underline">← 一覧に戻る</button>
+        <button onClick={() => { click(); navigate('/memory-sets')}} className="font-bold underline">← 一覧に戻る</button>
         <h1 className="text-2xl font-black">{isEditMode ? "編集" : "新規作成"}</h1>
-        {isEditMode ? <button onClick={handleDelete} className="bg-red-100 text-red-600 px-3 py-1 rounded font-bold hover:bg-red-200">削除 🗑️</button> : <div className="w-10"></div>}
+        {isEditMode ? <button onClick={() => { click(); handleDelete();}} className="bg-red-100 text-red-600 px-3 py-1 rounded font-bold hover:bg-red-200">削除 🗑️</button> : <div className="w-10"></div>}
       </header>
 
       <div className="flex-1 w-full max-w-7xl p-4 z-10 overflow-y-auto pb-24">
@@ -186,7 +190,7 @@ export default function CreateMemorySet() {
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 3, 4].map(num => (
                       <button key={num} 
-                        onClick={() => setQuestionsPerRound(num)}
+                        onClick={() => { click(); setQuestionsPerRound(num)}}
                         className={`py-2 rounded-lg font-bold border-2 transition ${questionsPerRound === num ? 'bg-[#8d6e63] text-white border-[#5d4037]' : 'bg-white text-gray-500 border-gray-300'}`}>
                         {num}
                       </button>
@@ -221,8 +225,8 @@ export default function CreateMemorySet() {
                 <div className="border-t-2 border-[#d7ccc8] pt-4">
                   <label className="block font-bold mb-2 text-sm">ゲーム終了条件</label>
                   <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden mb-3">
-                    <button onClick={() => setConditionType('score')} className={`flex-1 py-2 font-bold transition ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>正解数</button>
-                    <button onClick={() => setConditionType('total')} className={`flex-1 py-2 font-bold transition ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>出題数</button>
+                    <button onClick={() => { click(); setConditionType('score')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>正解数</button>
+                    <button onClick={() => { click(); setConditionType('total')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>出題数</button>
                   </div>
                   <div className="flex items-center gap-2">
                     <input type="number" className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" value={winScore} onChange={(e) => setWinScore(Number(e.target.value))} />
@@ -240,17 +244,17 @@ export default function CreateMemorySet() {
                 <span className="font-bold text-gray-400 w-6">{i + 1}.</span>
                 <input className="flex-1 p-2 border-2 border-[#d7ccc8] rounded-lg font-bold" placeholder="単語" value={word.text} onChange={e => handleChange(i, 'text', e.target.value)} />
                 <input className="flex-1 p-2 border-2 border-[#d7ccc8] rounded-lg font-bold" placeholder="よみがな/意味" value={word.kana} onChange={e => handleChange(i, 'kana', e.target.value)} />
-                <button onClick={() => removeRow(i)} className="bg-red-200 text-red-600 w-10 h-10 rounded-full font-bold hover:bg-red-300 shrink-0">×</button>
+                <button onClick={() => { click(); removeRow(i)}} className="bg-red-200 text-red-600 w-10 h-10 rounded-full font-bold hover:bg-red-300 shrink-0">×</button>
               </div>
             ))}
-            <button onClick={addRow} className="w-full py-4 border-4 border-dashed border-[#8d6e63] text-[#8d6e63] rounded-2xl font-black hover:bg-white/50 transition">＋ 行を追加</button>
+            <button onClick={() => { click(); addRow();}} className="w-full py-4 border-4 border-dashed border-[#8d6e63] text-[#8d6e63] rounded-2xl font-black hover:bg-white/50 transition">＋ 行を追加</button>
           </div>
 
         </div>
       </div>
 
       <div className="fixed bottom-0 w-full bg-white/90 p-4 border-t-4 border-[#8d6e63] z-20 flex justify-center">
-        <button onClick={handleSubmit} className="theme-leaf-btn px-12 py-3 rounded-full font-black text-2xl shadow-xl transform transition hover:scale-105">{isEditMode ? "更新して完了" : "保存して完了"}</button>
+        <button onClick={() => { click(); handleSubmit();}} className="theme-leaf-btn px-12 py-3 rounded-full font-black text-2xl shadow-xl transform transition hover:scale-105">{isEditMode ? "更新して完了" : "保存して完了"}</button>
       </div>
 
       {showSuccessModal && (
@@ -260,8 +264,8 @@ export default function CreateMemorySet() {
             <h2 className="text-3xl font-black text-[#556b2f] mb-2">完了！</h2>
             <p className="text-gray-600 font-bold mb-8">「{title}」を保存しました。</p>
             <div className="space-y-4">
-              <button onClick={handleReset} className="w-full theme-leaf-btn py-4 rounded-xl font-black text-lg shadow-md">{isEditMode ? "新規で別のセットを作る" : "続けて新規登録する"}</button>
-              <button onClick={() => navigate('/memory-sets')} className="w-full bg-gray-100 text-[#5d4037] border-2 border-[#d7ccc8] py-4 rounded-xl font-bold text-lg shadow-sm hover:bg-gray-200">一覧に戻る</button>
+              <button onClick={() => { click(); handleReset();}} className="w-full theme-leaf-btn py-4 rounded-xl font-black text-lg shadow-md">{isEditMode ? "新規で別のセットを作る" : "続けて新規登録する"}</button>
+              <button onClick={() => { click(); navigate('/memory-sets')}} className="w-full bg-gray-100 text-[#5d4037] border-2 border-[#d7ccc8] py-4 rounded-xl font-bold text-lg shadow-sm hover:bg-gray-200">一覧に戻る</button>
             </div>
           </div>
         </div>

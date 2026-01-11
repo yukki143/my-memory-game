@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import Home from './components/Home';
 import SoloMode from './components/SoloMode';
 import BattleLobby from './components/BattleLobby';
@@ -10,16 +10,40 @@ import CreateMemorySet from './components/CreateMemorySet';
 import MemorySetList from './components/MemorySetList';
 import { BgmPlayer } from './components/BgmPlayer';
 import { type GameSettings } from './types';
+import { useBgm } from './context/BgmContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 function App() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { setBgm } = useBgm();
 
+    // ★非ゲーム画面のBGMはルートで確実にセット（solo/battleは各画面のstateで制御）
   useEffect(() => {
-    fetch(`${API_BASE}/`)
-      .catch(() => console.log("Server might be offline"));
-  }, []);
+    const path = location.pathname;
+
+    if (path === '/') {
+      setBgm('home', false);
+      return;
+    }
+    if (path === '/lobby') {
+      setBgm('lobby', false);
+      return;
+    }
+
+        // login/register/create-set 等は home 扱いにしたいなら追加
+    if (
+      path === '/login' ||
+      path === '/register' ||
+      path === '/memory-sets' ||
+      path === '/create-set' ||
+      path.startsWith('/edit-set/')
+    ) {
+      setBgm('home', false);
+      return;
+    }
+  }, [location.pathname, setBgm]);
 
   const handleGameStart = (mode: 'online' | 'solo', settings?: GameSettings) => {
     if (mode === 'solo') {

@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ForestPath from './ForestPath';
+import { useSound } from '../hooks/useSound';
 
 export default function Register() {
   const navigate = useNavigate();
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -51,12 +55,12 @@ export default function Register() {
           </div>
         </div>
 
-        <button onClick={handleRegister} className="w-full mt-8 bg-blue-500 text-white border-b-4 border-blue-700 py-3 rounded-xl font-black text-xl shadow-lg transform transition hover:scale-105 active:border-b-0 active:translate-y-1">
+        <button onClick={() => { click(); handleRegister();}} className="w-full mt-8 bg-blue-500 text-white border-b-4 border-blue-700 py-3 rounded-xl font-black text-xl shadow-lg transform transition hover:scale-105 active:border-b-0 active:translate-y-1">
           登録する
         </button>
 
         <div className="mt-4 text-center">
-          <button onClick={() => navigate('/login')} className="text-sm underline hover:text-blue-600 font-bold">
+          <button onClick={() => {click(); navigate('/login')}} className="text-sm underline hover:text-blue-600 font-bold">
             ログイン画面に戻る
           </button>
         </div>

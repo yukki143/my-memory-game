@@ -3,6 +3,7 @@
 import { useState, useRef } from 'react';
 import { type GlobalSettings } from '../types';
 import { useSettings } from '../context/SettingsContext';
+import { useSound } from '../hooks/useSound';
 
 type Props = {
   currentSettings: GlobalSettings;
@@ -13,6 +14,11 @@ type Props = {
 
 export default function SettingsModal({ currentSettings, onClose, onSave }: Props) {
   const { updateSettings } = useSettings();
+
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
+
   
   // 1. モーダルが開いた瞬間の設定を保持（キャンセル時に「差し戻す」ため）
   const initialSettings = useRef<GlobalSettings>({ ...currentSettings });
@@ -54,7 +60,7 @@ export default function SettingsModal({ currentSettings, onClose, onSave }: Prop
       <div className="theme-white-wood-card p-8 max-w-md w-full relative shadow-2xl">
         <button 
           type="button" 
-          onClick={handleCancel} 
+          onClick={() => { click();handleCancel();}} 
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl font-bold"
         >
           ✕
@@ -138,7 +144,7 @@ export default function SettingsModal({ currentSettings, onClose, onSave }: Prop
           <div className="pt-4 flex gap-4">
             <button 
               type="button" 
-              onClick={handleCancel} 
+              onClick={() => { click();handleCancel();}} 
               className="flex-1 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition-colors"
             >
               キャンセル

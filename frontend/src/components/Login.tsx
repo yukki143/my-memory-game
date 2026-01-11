@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { loginRequest, setToken } from '../utils/auth';
 import ForestPath from './ForestPath';
+import { useSound } from '../hooks/useSound';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -9,6 +10,9 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
 
   const handleLogin = async () => {
     try {
@@ -59,17 +63,17 @@ export default function Login() {
           </div>
         </div>
 
-        <button onClick={handleLogin} className="w-full mt-6 theme-leaf-btn py-3 rounded-xl font-black text-xl shadow-lg transform transition hover:scale-105">
+        <button onClick={() => { click(); handleLogin();}} className="w-full mt-6 theme-leaf-btn py-3 rounded-xl font-black text-xl shadow-lg transform transition hover:scale-105">
           ログイン
         </button>
 
         <div className="mt-4 text-center">
-          <button onClick={() => navigate('/register')} className="text-sm underline hover:text-blue-600 font-bold">
+          <button onClick={() => {click(); navigate('/register')}} className="text-sm underline hover:text-blue-600 font-bold">
             アカウントをお持ちでない方はこちら (登録)
           </button>
         </div>
         <div className="mt-2 text-center">
-          <button onClick={() => navigate('/')} className="text-sm underline hover:text-gray-600">ホームに戻る</button>
+          <button onClick={() => {click(); navigate('/')}} className="text-sm underline hover:text-gray-600">ホームに戻る</button>
         </div>
       </div>
     </div>

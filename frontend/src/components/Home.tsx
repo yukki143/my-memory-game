@@ -8,6 +8,7 @@ import {
 import { useSettings } from '../context/SettingsContext'; // Contextを使用
 import { getToken, authFetch } from '../utils/auth';
 import { logout } from '../utils/auth';
+import { useSound } from '../hooks/useSound';
 
 type HomeProps = {
   onGameStart: (mode: 'online' | 'solo', settings?: GameSettings) => void;
@@ -197,6 +198,11 @@ function Home({ onGameStart }: HomeProps) {
     alert("ログアウトしました");
     window.location.reload();
   };
+  
+  const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
+  const click = () => playSE(CLICK_SE);
+
 
   return (
     <div className={`min-h-screen text-[#5D4037] p-8 flex flex-col items-center justify-center relative overflow-hidden font-hakoniwa transition-colors duration-1000 
@@ -229,7 +235,7 @@ function Home({ onGameStart }: HomeProps) {
       {/* ログインバッジ / ログインボタン */}
       {username ? (
         <div 
-          onClick={() => setShowLogoutModal(true)}
+          onClick={() => {click(); setShowLogoutModal(true)}}
           className="absolute top-4 left-4 z-30 bg-white/90 px-4 py-2 rounded-full shadow-md border-2 border-[#8B4513] flex items-center gap-2 animate-fade-in-down cursor-pointer hover:bg-gray-100 hover:scale-105 transition"
         >
           <span className="text-xl">🧑‍🌾</span>
@@ -241,7 +247,7 @@ function Home({ onGameStart }: HomeProps) {
         </div>
       ) : (
         <button 
-          onClick={() => navigate('/login')}
+          onClick={() => {click(); handleCreateClick();}}
           className="absolute top-4 left-4 z-30 bg-white/90 px-6 py-2 rounded-full shadow-md border-2 border-[#8B4513] flex items-center gap-2 animate-fade-in-down cursor-pointer hover:bg-gray-100 hover:scale-105 transition font-bold"
         >
           <span className="text-xl">🔑</span>
@@ -262,8 +268,8 @@ function Home({ onGameStart }: HomeProps) {
             </p>
           </header>
           <div className="grid grid-cols-2 gap-4 h-full">
-            <MenuButton text="設定" sub="Customize" onClick={() => setShowSettings(true)} />
-            <MenuButton text="クリエイト" sub="Make Stage" onClick={handleCreateClick} />
+            <MenuButton text="設定" sub="Customize" onClick={() => {click(); setShowSettings(true)}} />
+            <MenuButton text="クリエイト" sub="Make Stage" onClick={() => { click(); handleCreateClick();}} />
           </div>
         </div>
 
@@ -276,7 +282,7 @@ function Home({ onGameStart }: HomeProps) {
             <span className="text-4xl animate-sparkle-spin-y-reverse">⭐</span> 
           </h2>
           <div className="space-y-4">
-            <button onClick={() => setShowModeSelect(true)} className="w-full theme-leaf-btn p-2 group">
+            <button onClick={() => {click(); setShowModeSelect(true)}} className="w-full theme-leaf-btn p-2 group">
               <div className="w-full h-full p-4 flex justify-between items-center">
                 <div className="text-left">
                   <div className="text-xl md:text-2xl font-black group-hover:text-white transition-colors duration-75">フラッシュタイピング</div>
@@ -288,7 +294,7 @@ function Home({ onGameStart }: HomeProps) {
         </div>
 
         <div className="md:hidden flex justify-center w-full">
-          <button onClick={() => setIsMobileModeSelection(true)} className="w-80 bg-white/90 border-4 border-[#8B4513]/20 rounded-full py-5 shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-3 group">
+          <button onClick={() => {click(); setIsMobileModeSelection(true)}} className="w-80 bg-white/90 border-4 border-[#8B4513]/20 rounded-full py-5 shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-3 group">
             <span className="text-xl animate-sparkle-spin-y-reverse">⭐</span>
             <span className="text-xl font-black text-[#556b2f] tracking-wider">メインモード</span>
             <span className="text-xl animate-sparkle-spin-y-reverse">⭐</span>
@@ -303,19 +309,19 @@ function Home({ onGameStart }: HomeProps) {
             SELECT MODE
           </h2>
           <button 
-            onClick={() => navigate('/memory-sets')} 
+            onClick={() => {click(); navigate('/memory-sets')}} 
             className="theme-leaf-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
           >
-            <span>ソロプレイ</span>
+            <span>ソロモード</span>
           </button>
           <button 
-            onClick={() => navigate('/lobby')} 
+            onClick={() => {click(); navigate('/lobby')}} 
             className="theme-flower-btn py-6 rounded-2xl font-black text-2xl shadow-xl flex items-center justify-center gap-2"
           >
-            <span>マルチプレイ</span>
+            <span>バトルモード</span>
           </button>
           <button 
-            onClick={() => setIsMobileModeSelection(false)} 
+            onClick={() => {click(); setIsMobileModeSelection(false)}} 
             className="mt-4 bg-white/80 text-[#8d6e63] font-bold py-4 rounded-xl border-2 border-[#d7ccc8] shadow-sm hover:bg-[#efebe9]"
           >
             戻る
@@ -329,10 +335,10 @@ function Home({ onGameStart }: HomeProps) {
               <div className="theme-white-wood-card p-8 max-w-lg w-full">
                   <h3 className="text-2xl font-black mb-8 text-center text-[#FFFFFF]">プレイスタイルを選択</h3>
                   <div className="grid gap-6">
-                      <button onClick={() => navigate('/memory-sets')} className="theme-leaf-btn py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4"><span>ソロプレイ</span></button>
-                      <button onClick={() => navigate('/lobby')} className="theme-flower-btn py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4"><span>マルチプレイ</span></button>
+                      <button onClick={() => {click(); navigate('/memory-sets')}} className="theme-leaf-btn py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4"><span>ソロモード</span></button>
+                      <button onClick={() => {click(); navigate('/lobby')}} className="theme-flower-btn py-6 rounded-2xl font-black text-2xl flex items-center justify-center gap-4"><span>バトルモード</span></button>
                   </div>
-                  <button onClick={() => setShowModeSelect(false)} className="mt-8 bg-white text-[#8d6e63] font-bold w-full py-3 rounded-xl border-2 border-[#d7ccc8] hover:bg-[#efebe9] transition-all">やめる</button>
+                  <button onClick={() => {click(); setShowModeSelect(false)}} className="mt-8 bg-white text-[#8d6e63] font-bold w-full py-3 rounded-xl border-2 border-[#d7ccc8] hover:bg-[#efebe9] transition-all">やめる</button>
               </div>
           </div>
       )}
@@ -340,7 +346,7 @@ function Home({ onGameStart }: HomeProps) {
       {showSettings && (
         <SettingsModal 
           currentSettings={settings} 
-          onClose={() => setShowSettings(false)} 
+          onClose={() => {click(); setShowSettings(false)}} 
           onSave={handleSaveSettings} 
         />
       )}
@@ -351,8 +357,8 @@ function Home({ onGameStart }: HomeProps) {
                 <div className="text-5xl mb-4">👋</div>
                 <h3 className="text-xl font-black text-[#5d4037] mb-2">ログアウトしますか？</h3>
                 <div className="flex gap-4 justify-center mt-6">
-                    <button onClick={() => setShowLogoutModal(false)} className="flex-1 py-3 bg-gray-200 rounded-xl font-bold text-gray-600 hover:bg-gray-300 transition">キャンセル</button>
-                    <button onClick={handleLogout} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-md hover:bg-red-600 transition">ログアウト</button>
+                    <button onClick={() => {click(); setShowLogoutModal(false)}} className="flex-1 py-3 bg-gray-200 rounded-xl font-bold text-gray-600 hover:bg-gray-300 transition">キャンセル</button>
+                    <button onClick={() => {click(); handleLogout();}} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold shadow-md hover:bg-red-600 transition">ログアウト</button>
                 </div>
             </div>
         </div>
