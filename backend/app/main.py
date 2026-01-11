@@ -142,9 +142,9 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def read_root():
-    return {"status": "ok"}
+# @app.get("/")
+# def read_root():
+#     return {"status": "ok"}
 
 
 # ==========================
