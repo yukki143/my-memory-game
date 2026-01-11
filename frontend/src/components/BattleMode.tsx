@@ -1,4 +1,4 @@
-// src/BattleMode.tsx
+// src/BattleMode.tsx 全文修正
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import GamePC from './GamePC';
@@ -88,6 +88,7 @@ function BattleMode() {
 
   const socketRef = useRef<WebSocket | null>(null);
   const roundNumberRef = useRef(0); 
+  const retryRequestedRef = useRef(false);
 
   useEffect(() => {
     roundNumberRef.current = roundNumber;
@@ -99,11 +100,21 @@ function BattleMode() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const wsSend = (cmd: string) => {
+      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+          socketRef.current.send(`${playerId}:${cmd}`);
+          return true;
+      }
+      return false;
+  };
+
   useEffect(() => {
     let ws: WebSocket | null = null;
     let isMounted = true;
+    let reconnectTimeout: any = null;
 
     const joinRoom = () => {
+      if (!isMounted) return;
       const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
       const WS_BASE = API_BASE.replace(/^http/, 'ws');
       const setParam = memorySetId ? `?setName=${memorySetId}` : "";
@@ -111,7 +122,12 @@ function BattleMode() {
       ws = new WebSocket(`${WS_BASE}/ws/battle/${roomId}/${playerId}${setParam}`);
       socketRef.current = ws;
       
-      ws.onopen = () => { if (isMounted) setIsConnected(true); };
+      ws.onopen = () => { 
+        if (!isMounted) return;
+        setIsConnected(true);
+        wsSend("NAME:" + playerName);
+        if (retryRequestedRef.current) wsSend("RETRY");
+      };
 
       ws.onmessage = (event) => {
         if (!isMounted) return;
@@ -119,35 +135,55 @@ function BattleMode() {
         
         if (msg.startsWith("SERVER:")) {
           const command = msg.substring(7);
+          if (command.startsWith("SYNC:")) {
+            try {
+              const syncData = JSON.parse(command.substring(5));
+              if (syncData.names) {
+                const rivalId = Object.keys(syncData.names).find(id => id !== playerId);
+                if (rivalId) {
+                  setOpponentName(syncData.names[rivalId]);
+                  setIsOpponentPresent(true);
+                }
+              }
+              if (syncData.scores) {
+                setMyScore(syncData.scores[playerId] || 0);
+                const rivalId = Object.keys(syncData.scores).find(id => id !== playerId);
+                if (rivalId) setOpponentScore(syncData.scores[rivalId] || 0);
+              }
+              if (syncData.status === 'playing') {
+                setGameStatus('playing');
+                if (syncData.currentRound > roundNumberRef.current) {
+                  setRoundNumber(syncData.currentRound);
+                  setServerSeed(syncData.seed);
+                  setRoundResult(null);
+                  setRoundWinnerId(null);
+                  setIMissed(false);
+                  setOpponentMissed(false);
+                }
+              }
+            } catch (e) {}
+            return;
+          }
           if (command === "MATCHED") {
-            // ★修正: 新ゲーム開始時は即座にRefをリセットして古いRoundメッセージを破棄しないようにする
             roundNumberRef.current = 0; 
             prepareNextGame();
             startCountdown();
             setIsOpponentPresent(true);
-            wsSend("NAME:" + playerName);
+            retryRequestedRef.current = false;
           } 
-          else if (command === "OPPONENT_LEFT") {
-            setIsOpponentPresent(false);
-            setOpponentRetryReady(false);
-            setIsRetryReady(false);
-          }
+          else if (command === "OPPONENT_LEFT") { setIsOpponentPresent(false); }
           else if (command.startsWith("NEXT_ROUND:")) {
             try {
               const data = JSON.parse(command.substring(11));
-              // 同一ラウンドや古いラウンドの重複処理を防止
               if (data.round <= roundNumberRef.current && roundNumberRef.current !== 0) return;
-              
               setRoundNumber(data.round);
-              roundNumberRef.current = data.round; // Refを即時更新
-              
-              // ラウンド開始ごとに状態をクリーンアップ
+              roundNumberRef.current = data.round;
               setRoundResult(null);
               setRoundWinnerId(null);
               setIMissed(false);
               setOpponentMissed(false);
               setServerSeed(data.seed);
-            } catch (e) { console.error("NEXT_ROUND parse error", e); }
+            } catch (e) {}
           }
           return;
         }
@@ -165,29 +201,28 @@ function BattleMode() {
           }
           else if (command.startsWith("SCORE_UP")) {
             setRoundWinnerId(senderId);
-            if (senderId === playerId) {
-              setRoundResult('correct');
-            } else {
-              setOpponentScore(prev => prev + 1);
-            }
+            if (senderId === playerId) { 
+              setRoundResult('correct'); 
+              setMyScore(prev => prev + 1);
+            } 
+            else { setOpponentScore(prev => prev + 1); }
           } 
           else if (command.startsWith("MISS")) {
-            if (senderId === playerId) {
-              setRoundResult('wrong');
-              setIMissed(true);
-            } else {
-              setOpponentMissed(true);
-            }
+            if (senderId === playerId) { setRoundResult('wrong'); setIMissed(true); } 
+            else { setOpponentMissed(true); }
           } 
           else if (command === "RETRY") {
-            if (senderId !== playerId) {
-              setOpponentRetryReady(true);
-            }
+            if (senderId !== playerId) { setOpponentRetryReady(true); }
           }
         }
       };
 
-      ws.onclose = () => { if (isMounted) setIsConnected(false); };
+      ws.onclose = () => { 
+        if (!isMounted) return;
+        setIsConnected(false);
+        // ★ 依存配列から削った代わりに、ここで現在の状態を見て再接続を判断
+        reconnectTimeout = setTimeout(joinRoom, 1500);
+      };
     };
 
     joinRoom();
@@ -195,28 +230,17 @@ function BattleMode() {
     return () => {
       isMounted = false;
       if (ws) ws.close();
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
       socketRef.current = null;
     };
+    // ★重要: ここに gameStatus や isRetryReady を入れてはいけない
   }, [roomId, playerId, playerName, memorySetId]);
 
-  const startCountdown = () => {
-      setGameStatus('countdown');
-      setCountdownValue(3);
-  };
-
-  const wsSend = (cmd: string) => {
-      if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-          socketRef.current.send(`${playerId}:${cmd}`);
-      }
-  };
+  const startCountdown = () => { setGameStatus('countdown'); setCountdownValue(3); };
 
   const recordStat = async (wordText: string, isCorrect: boolean) => {
     if (!getToken()) return;
-    try {
-      await authFetch(`/api/word_stats?word_text=${encodeURIComponent(wordText)}&is_correct=${isCorrect}`, {
-        method: 'POST'
-      });
-    } catch (e) { console.error("Stat recording failed", e); }
+    try { await authFetch(`/api/word_stats?word_text=${encodeURIComponent(wordText)}&is_correct=${isCorrect}`, { method: 'POST' }); } catch (e) {}
   };
 
   useEffect(() => {
@@ -238,35 +262,24 @@ function BattleMode() {
   };
 
   const prepareNextGame = () => {
-    setMyScore(0);
-    setOpponentScore(0);
-    setIMissed(false);
-    setOpponentMissed(false);
-    setRoundResult(null);
-    setRoundWinnerId(null);
-    setIsRetryReady(false);
-    setOpponentRetryReady(false); // リセット漏れがないように確実に行う
-    setMissedProblems([]);
-    setMyTypoCount(0); 
-    setMissedKeyStats({}); 
-    setClearTime(0);
-    setRoundNumber(0);
-    setCorrectOnFirstTry(0);
-    setTotalRoundsPlayed(0);
+    setMyScore(0); setOpponentScore(0); setIMissed(false); setOpponentMissed(false);
+    setRoundResult(null); setRoundWinnerId(null); setIsRetryReady(false); setOpponentRetryReady(false);
+    setMissedProblems([]); setMyTypoCount(0); setMissedKeyStats({}); 
+    setClearTime(0); setRoundNumber(0); setCorrectOnFirstTry(0); setTotalRoundsPlayed(0);
+    retryRequestedRef.current = false;
   };
 
   const handleRetry = () => {
     if (isRetryReady || !isOpponentPresent) return;
     setIsRetryReady(true);
+    retryRequestedRef.current = true;
     wsSend("RETRY");
   };
 
   const addScore = (problem?: Problem) => {
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
-    setMyScore(prev => prev + 1);
     setTotalRoundsPlayed(prev => prev + 1);
     setCorrectOnFirstTry(prev => prev + 1);
-
     if (problem) recordStat(problem.text, true);
     wsSend(`SCORE_UP:round${roundNumber}`); 
   };
@@ -274,10 +287,7 @@ function BattleMode() {
   const sendMiss = (problem?: Problem) => {
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     setTotalRoundsPlayed(prev => prev + 1);
-    if (problem) {
-      setMissedProblems(prev => [...prev, problem]);
-      recordStat(problem.text, false);
-    }
+    if (problem) { setMissedProblems(prev => [...prev, problem]); recordStat(problem.text, false); }
     wsSend(`MISS:round${roundNumber}`);
   };
 
@@ -290,6 +300,25 @@ function BattleMode() {
               return { ...prev, [char]: (prev[char] || 0) + 1 };
           });
       }
+  };
+
+    const getTypingRank = (count: number, score: number) => {
+      if (count === 0 && score === 0) return '-';
+      if (count === 0) return 'S';
+      if (count <= 3) return 'A';
+      if (count <= 8) return 'B';
+      if (count <= 12) return 'C';
+      if (count <= 15) return 'D';
+      return 'E';
+  };
+
+  const getMemoryRank = (accuracy: number) => {
+      if (accuracy >= 100) return 'S';
+      if (accuracy >= 90) return 'A';
+      if (accuracy >= 80) return 'B';
+      if (accuracy >= 70) return 'C';
+      if (accuracy >= 60) return 'D';
+      return 'E';
   };
 
   const getSortedMissedKeys = () => {
@@ -318,22 +347,21 @@ function BattleMode() {
   const showHUD = gameStatus === 'countdown' || gameStatus === 'playing';
   const isInputLocked = iMissed || roundResult === 'correct' || !!roundWinnerId;
 
+  const attempted = myScore + missedProblems.length;
+  const currentAccuracy = attempted === 0 ? 0 : (myScore / attempted) * 100;
+
+
   return (
     <div className={`relative w-screen flex flex-col items-center justify-center p-4 overflow-x-hidden
         ${isMobile && gameStatus === 'finished' ? 'min-h-screen overflow-y-auto' : 'h-screen overflow-hidden'}`}>
-      
       <div className="fixed inset-0 bg-green-100 -z-20" />
       <div className="fixed inset-0 -z-10"><ForestPath overlayOpacity={0.2} /></div>
-
       <button onClick={() => navigate('/')} className="fixed top-4 left-4 z-[100] theme-wood-btn px-6 py-3 flex items-center gap-2 font-bold text-sm md:text-base cursor-pointer">
         <span>←</span> <span>もどる</span>
       </button>
 
       {isMobile && showHUD && (
-        <MobileScoreBoard 
-          myScore={myScore} opponentScore={opponentScore} winningScore={WINNING_SCORE}
-          myName={playerName} opponentName={opponentName}
-        />
+        <MobileScoreBoard myScore={myScore} opponentScore={opponentScore} winningScore={WINNING_SCORE} myName={playerName} opponentName={opponentName} />
       )}
 
       {roundResult && gameStatus === 'playing' && (
@@ -346,29 +374,27 @@ function BattleMode() {
 
       {iMissed && !roundWinnerId && gameStatus === 'playing' && (
           <div className="fixed inset-0 z-[60] bg-black/50 flex flex-col items-center justify-center animate-fade-in">
-              <div className="text-xl font-bold text-white animate-pulse">相手の回答を待っています...</div>
+              <div className="text-xl font-bold text-white animate-pulse">判定中...</div>
           </div>
       )}
 
       <div className={`relative z-10 w-full flex flex-col items-center justify-center ${isMobile && gameStatus === 'finished' ? 'my-10' : 'h-full'}`}>
         {!isConnected ? (
-            <div className="text-4xl md:text-6xl font-black text-white drop-shadow-lg animate-pulse">CONNECTING...</div>
+            <div className="text-4xl md:text-6xl font-black text-white drop-shadow-lg animate-pulse uppercase">Connecting...</div>
         ) : (
             <div className="w-full h-full flex flex-col items-center justify-center">
                 {gameStatus === 'waiting' && (
                     <div className="text-center animate-pulse">
-                        <h2 className="text-4xl md:text-6xl font-black text-white drop-shadow-lg mb-4">WAITING FOR<br/>CHALLENGER...</h2>
+                        <h2 className="text-4xl md:text-6xl font-black text-white drop-shadow-lg mb-4 font-hakoniwa">対戦相手を待っています...</h2>
                         <div className="theme-wood-box px-4 py-2 font-bold text-xs inline-block">Room ID: {displayRoomId}</div>
                     </div>
                 )}
-
                 {gameStatus === 'countdown' && (
                     <div className="flex flex-col items-center justify-center">
                         <div className="text-2xl md:text-4xl font-bold text-white drop-shadow-md mb-4 animate-bounce">MATCHED!</div>
                         <div className="text-5xl md:text-5xl font-black text-[#ffca28] scale-150 animate-pop-in">{countdownValue > 0 ? countdownValue : "START!"}</div>
                     </div>
                 )}
-
                 {gameStatus === 'playing' && (
                     <div className="w-full h-full flex flex-row justify-center items-center gap-4 md:gap-12 pb-4">
                         {!isMobile && (
@@ -381,27 +407,15 @@ function BattleMode() {
                                 </div>
                             </div>
                         )}
-
                         <div className="flex flex-col items-center justify-center flex-1 min-w-0">
                             <div className={`overflow-hidden animate-pop-in relative ${isMobile ? 'w-[90vw] h-[70vh] min-h-[550px] mt-4 bg-[#fff8e1] rounded-3xl border-4 border-[#d4a373] shadow-xl flex flex-col' : 'bg-white/90 rounded-3xl shadow-2xl border-8 border-[#d4a373] w-full max-w-5xl h-[70vh] min-h-[500px]'}`}>
                                 {isMobile ? (
-                                    <GameMobile 
-                                      onScore={addScore} onWrong={sendMiss} resetKey={roundNumber}
-                                      roomId={roomId} playerId={playerId} setId={memorySetId}
-                                      seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)}
-                                      totalAttempted={roundNumber} isLocked={isInputLocked}
-                                    /> 
+                                    <GameMobile onScore={addScore} onWrong={sendMiss} resetKey={roundNumber} roomId={roomId} playerId={playerId} setId={memorySetId} seed={serverSeed} settings={settings} wrongHistory={missedProblems.map(p => p.text)} totalAttempted={roundNumber} isLocked={isInputLocked} /> 
                                 ) : (
-                                    <GamePC 
-                                        onScore={addScore} onWrong={sendMiss} onTypo={handleTypo} resetKey={roundNumber}
-                                        roomId={roomId} playerId={playerId} setId={memorySetId}
-                                        settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)}
-                                        totalAttempted={roundNumber} isLocked={isInputLocked}
-                                    />
+                                    <GamePC onScore={addScore} onWrong={sendMiss} onTypo={handleTypo} resetKey={roundNumber} roomId={roomId} playerId={playerId} setId={memorySetId} settings={settings} seed={serverSeed} wrongHistory={missedProblems.map(p => p.text)} totalAttempted={roundNumber} isLocked={isInputLocked} />
                                 )}
                             </div>
                         </div>
-
                         {!isMobile && (
                             <div className="w-64 theme-wood-box p-6 text-center shrink-0 shadow-xl border-4 border-[#8d6e63] bg-[#fff8e1]">
                                 <div className="text-xl font-bold mb-2 text-[#5d4037]">RIVAL</div>
@@ -414,64 +428,72 @@ function BattleMode() {
                         )}
                     </div>
                 )}
-
                 {gameStatus === 'finished' && (
-                    <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 
-                        ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[85vh]'}`}>
-                        
+                    <div className={`relative z-50 w-full max-w-6xl flex flex-col md:flex-row gap-6 items-stretch justify-center p-2 ${isMobile ? 'h-auto mt-20 pb-10' : 'h-[75vh]'}`}>
                         <div className="w-full md:w-[45%] h-full min-w-0">
                             <div className="theme-wood-box p-6 h-full flex flex-col items-center shadow-2xl animate-fade-in-up">
-                                {myScore > opponentScore ? (
-                                    <div className="text-5xl md:text-7xl font-black text-yellow-500 mb-2 pt-4 animate-bounce">YOU WIN!</div>
-                                ) : myScore < opponentScore ? (
-                                    <div className="text-5xl md:text-7xl font-black text-blue-500 mb-2 pt-4">YOU LOSE...</div>
-                                ) : (
-                                    <div className="text-5xl md:text-7xl font-black text-green-500 mb-2 pt-4">DRAW</div>
-                                )}
-                                
-                                <div className="text-4xl md:text-6xl font-black mt-4 mb-6 text-[#5d4037] drop-shadow-md text-center">
-                                    <div className="text-sm font-bold text-gray-400 mb-1">Total Time</div>
-                                    {clearTime.toFixed(2)} <span className="text-2xl font-hakoniwa">秒</span>
+                                {myScore > opponentScore ? ( <div className="text-5xl md:text-7xl font-black text-yellow-500 mb-2 pt-10 animate-bounce">YOU WIN!!</div> ) : myScore < opponentScore ? ( <div className="text-5xl md:text-7xl font-black text-blue-500 mb-2 pt-10">YOU LOSE...</div> ) : ( <div className="text-5xl md:text-7xl font-black text-green-500 mb-2 pt-4">DRAW</div> )}
+
+                                {/* スコア表示エリア */}
+                                <div className="flex items-end justify-center w-full mt-8 mb-8 select-none">
+  
+                                  {/* 自分サイド */}
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-xl md:text-2xl font-black text-green-800 font-hakoniwa truncate max-w-[140px]">
+                                      {playerName}
+                                    </span>
+                                    <span className="text-emerald-600 text-6xl md:text-7xl font-black leading-none">
+                                      {myScore}
+                                    </span>
+                                  </div>
+
+                                  {/* 中央のハイフン：スコアの高さに合わせて配置 */}
+                                  <div className="mx-6 md:mx-2 self-end pb-2 md:pb-4">
+                                    <span className="text-[#8d6e63] text-6xl md:text-7xl font-black inline-block transform translate-y-5">
+                                      ー
+                                    </span>
+                                  </div>
+
+                                  {/* 相手サイド */}
+                                  <div className="flex flex-col items-center">
+                                    <span className="text-xl md:text-2xl font-black text-red-800 font-hakoniwa truncate max-w-[140px]">
+                                      {opponentName}
+                                    </span>
+                                    <span className="text-rose-500 text-6xl md:text-7xl font-black leading-none">
+                                      {opponentScore}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 <div className="mb-8 bg-[#fff8e1] border-4 border-[#d4a373] rounded-2xl p-6 w-full max-w-xs text-center shadow-inner">
-                                    <div className="text-2xl font-bold text-[#8d6e63] mb-2">連続勝利数 👑</div>
-                                    <div className="text-6xl font-black text-[#d97706]">{winStreak}</div>
+                                    <div className="text-2xl font-bold text-[#8d6e63] mb-2 font-hakoniwa">連続勝利数 👑</div><div className="text-6xl font-black text-[#d97706]">{winStreak}</div>
                                 </div>
-
-                                <div className="mt-auto w-full flex justify-center">
-                                    {!isOpponentPresent ? (
-                                      <div className="px-6 py-4 bg-gray-100 rounded-xl font-bold text-gray-400 border-2 border-dashed border-gray-300 w-full text-center">対戦相手が退出しました</div>
-                                    ) : isRetryReady && !opponentRetryReady ? (
-                                        <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div>
-                                    ) : (
-                                        <button onClick={handleRetry} className="theme-leaf-btn py-4 rounded-xl font-black text-xl shadow-lg w-full max-w-xs transition transform hover:scale-105">再戦する！</button>
-                                    )}
+                                <div className="mt-6 mb-6 w-full flex justify-center">
+                                    {!isOpponentPresent ? ( <div className="px-6 py-4 bg-gray-100 rounded-xl font-bold text-gray-400 border-2 border-dashed border-gray-300 w-full text-center">対戦相手が退出しました</div> ) : isRetryReady && !opponentRetryReady ? ( <div className="px-6 py-4 bg-gray-200 rounded-full font-bold text-gray-600 animate-pulse w-full text-center">相手を待っています...</div> ) : ( <button onClick={handleRetry} className="theme-leaf-btn py-4 rounded-xl font-black text-xl shadow-lg w-full max-w-xs transition transform hover:scale-105">再戦する！</button> )}
                                 </div>
                             </div>
                         </div>
-
                         <div className="flex-1 relative w-full md:w-auto">
                             <div className={`${isMobile ? '' : 'md:absolute md:inset-0 h-full'} theme-wood-box p-6 flex flex-col shadow-2xl animate-fade-in-up overflow-hidden`}>
-                                <h3 className="text-2xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] font-hakoniwa">詳細プレイ分析</h3>
+                                <h3 className="text-2xl font-bold mb-4 border-b-4 border-[#8d6e63] pb-2 text-[#5d4037] font-hakoniwa">プレイ分析</h3>
                                 <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+                                    
                                     <div className="bg-[#fff8e1] p-4 rounded-xl border-4 border-[#d4a373] shadow-inner">
-                                        <h4 className="text-sm font-bold text-[#5d4037] mb-3 text-center border-b border-[#d4a373] pb-1 mx-4">今回の成績</h4>
+                                        <h4 className="text-sm font-bold text-[#5d4037] mb-3 text-center border-b border-[#d4a373] pb-1 mx-4">総合評価</h4>
                                         <div className="flex justify-around items-center">
                                             <div className="text-center">
-                                                <div className="text-sm font-bold text-[#8d6e63] mb-1">暗記正答率</div>
-                                                <div className="text-5xl font-black text-[#d97706]">
-                                                  {totalRoundsPlayed > 0 ? ((correctOnFirstTry / totalRoundsPlayed) * 100).toFixed(0) : 0}%
-                                                </div>
+                                                <div className="text-sm font-bold text-[#8d6e63] mb-1">暗記力</div>
+                                                <div className="text-5xl font-black text-[#d97706]">{getMemoryRank(currentAccuracy)}</div>
                                             </div>
-                                            <div className="w-px h-12 bg-[#d4a373]"></div>
-                                            <div className="text-center">
-                                                <div className="text-sm font-bold text-[#8d6e63] mb-1">平均回答速度</div>
-                                                <div className="text-5xl font-black text-[#d97706]">
-                                                  {myScore > 0 ? (clearTime / myScore).toFixed(1) : '-'}
-                                                </div>
-                                                <div className="text-[10px] text-gray-400">秒/問</div>
-                                            </div>
+                                            {!isMobile && (
+                                                <>
+                                                    <div className="w-px h-12 bg-[#d4a373]"></div>
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-bold text-[#8d6e63] mb-1">タイピング</div>
+                                                        <div className="text-5xl font-black text-[#d97706]">{getTypingRank(myTypoCount, myScore)}</div>
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
                                     {!isMobile && (
@@ -479,10 +501,7 @@ function BattleMode() {
                                             <div className="text-sm font-bold text-red-800 mb-2">⌨️ 苦手なキー (Total: {myTypoCount})</div>
                                             <div className="flex gap-2 flex-wrap">
                                                 {getSortedMissedKeys().map(([key, count]) => (
-                                                    <div key={key} className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-lg font-bold border border-red-200 flex items-center gap-2">
-                                                        <span className="font-mono text-2xl">{key}</span>
-                                                        <span className="text-sm opacity-60">x{count}</span>
-                                                    </div>
+                                                    <div key={key} className="bg-red-50 text-red-700 px-3 py-2 rounded-lg text-lg font-bold border border-red-200 flex items-center gap-2"><span className="font-mono text-2xl">{key}</span><span className="text-sm opacity-60">x{count}</span></div>
                                                 ))}
                                                 {getSortedMissedKeys().length === 0 && <span className="text-gray-400 text-sm italic">ミスなし！完璧です！</span>}
                                             </div>
@@ -493,10 +512,7 @@ function BattleMode() {
                                         <div className="bg-white rounded border border-blue-100 max-h-[250px] overflow-y-auto">
                                             <ul className="divide-y divide-blue-50">
                                                 {missedProblems.map((p, i) => (
-                                                    <li key={i} className="p-3 flex justify-between items-center hover:bg-blue-50/50">
-                                                        <span className="font-bold text-red-600 mr-2">{p.text}</span>
-                                                        <span className="text-gray-500 text-xs">{p.kana}</span>
-                                                    </li>
+                                                    <li key={i} className="p-3 flex justify-between items-center hover:bg-blue-50/50"><span className="font-bold text-red-600 mr-2">{p.text}</span><span className="text-gray-500 text-xs">{p.kana}</span></li>
                                                 ))}
                                                 {missedProblems.length === 0 && <li className="p-3 text-center text-gray-400 text-sm">全問正解です！素晴らしい！</li>}
                                             </ul>
