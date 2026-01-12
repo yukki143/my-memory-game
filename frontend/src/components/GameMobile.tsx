@@ -35,6 +35,7 @@ function GameMobile({
 }: Props) {
 
   const { playSE } = useSound();
+  const CLICK_SE = '/sounds/se_click.mp3';
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
   const ANSWER_TIME = settings?.answerTime || 10;
@@ -254,7 +255,7 @@ function GameMobile({
                         {slots.map((slot, i) => (
                             <button 
                                 key={i} 
-                                onClick={() => handleTapSlot(i)} 
+                                onClick={() => {playSE(CLICK_SE); handleTapSlot(i)}} 
                                 disabled={gameState === 'waiting' || isFetching || isLocked} 
                                 className={`relative w-full p-3 rounded-xl border-4 font-bold text-xl min-h-[60px] transition-all 
                                     ${slot ? 'bg-white border-[#8d6e63] text-[#5d4037]' : 'bg-black/5 border-dashed border-gray-400 text-gray-400'}`}
@@ -269,10 +270,10 @@ function GameMobile({
                 <div className="h-16 flex items-center justify-center shrink-0 my-2">
                     {slots.every(s => s !== null) && gameState !== 'waiting' && !isFetching && !isLocked && (
                         <button 
-                            onClick={handleSubmit} 
+                            onClick={() => {playSE(CLICK_SE); handleSubmit();}} 
                             className="theme-leaf-btn px-10 py-3 rounded-full text-xl font-black shadow-lg transform active:scale-95 transition"
                         >
-                            回答を送信！
+                            決定
                         </button>
                     )}
                 </div>
