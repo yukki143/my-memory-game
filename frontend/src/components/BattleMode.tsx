@@ -63,7 +63,7 @@ function BattleMode() {
   const click = () => playSE(CLICK_SE);
 
   // ★ 追加: BGM制御
-  const { setBgm, resetBgm } = useBgm();
+  const { setBgm } = useBgm();
 
   const [isConnected, setIsConnected] = useState(false);
   const [gameStatus, setGameStatus] = useState<'waiting' | 'countdown' | 'playing' | 'finished'>('waiting');
@@ -101,8 +101,13 @@ function BattleMode() {
   // ★ 追加: Battleの状態に応じてBGMシーン/停止を更新
   useEffect(() => {
     // waiting〜countdown は lobby BGM
-    if (gameStatus === 'waiting' || gameStatus === 'countdown') {
+    if (gameStatus === 'waiting') {
       setBgm('lobby', false);
+      return;
+    }
+
+    if (gameStatus === 'countdown') {
+      setBgm('lobby', true);  // ★スタート押下後は止める
       return;
     }
 

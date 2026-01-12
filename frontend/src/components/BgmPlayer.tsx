@@ -2,8 +2,9 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { useBgm } from '../context/BgmContext';
+import type { BgmScene } from '../context/BgmContext';
 
-function sceneToSrc(scene: 'home' | 'lobby' | 'solo' | 'battle') {
+function sceneToSrc(scene: BgmScene) {
   switch (scene) {
     case 'lobby':
       return '/sounds/bgm_lobby.mp3';
@@ -11,6 +12,9 @@ function sceneToSrc(scene: 'home' | 'lobby' | 'solo' | 'battle') {
       return '/sounds/bgm_solo.mp3';
     case 'battle':
       return '/sounds/bgm_battle.mp3';
+    case 'create':
+      // ★追加: 作成/編集/一覧の共通BGM
+      return '/sounds/bgm_create.mp3';
     case 'home':
     default:
       return '/sounds/bgm_main.mp3';

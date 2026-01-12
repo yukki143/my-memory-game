@@ -1,4 +1,4 @@
-# backend/app/main.py 全文修正
+# backend/app/main.py
 import asyncio
 import os
 import json

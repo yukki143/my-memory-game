@@ -32,18 +32,26 @@ function App() {
       return;
     }
 
-        // login/register/create-set 等は home 扱いにしたいなら追加
+    // Create（一覧・新規作成・編集）
     if (
-      path === '/login' ||
-      path === '/register' ||
       path === '/memory-sets' ||
       path === '/create-set' ||
       path.startsWith('/edit-set/')
     ) {
+      setBgm('create', false);
+      return;
+    }
+
+    // Auth（曲は home 扱い）
+    if (path === '/login' || path === '/register') {
       setBgm('home', false);
       return;
     }
+
+    // それ以外はとりあえず home（必要なら増やす）
+    setBgm('home', false);
   }, [location.pathname, setBgm]);
+
 
   const handleGameStart = (mode: 'online' | 'solo', settings?: GameSettings) => {
     if (mode === 'solo') {

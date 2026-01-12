@@ -47,7 +47,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 768 : false);
 
   // ★ 追加: BGM制御
-  const { setBgm, resetBgm } = useBgm();
+  const { setBgm } = useBgm();
   const CLICK_SE = '/sounds/se_click.mp3';
   const click = () => playSE(CLICK_SE);
 
@@ -58,8 +58,13 @@ function SoloMode({ onBack }: { onBack: () => void }) {
   // ★ 追加: Soloのゲーム状態に応じてBGMシーン/停止を更新
   useEffect(() => {
     // ready〜countdown は lobby BGM（カウントダウン中も lobby）
-    if (gameState === 'ready' || gameState === 'countdown') {
+    if (gameState === 'ready') {
       setBgm('lobby', false);
+      return;
+    }
+
+    if (gameState === 'countdown') {
+      setBgm('lobby', true);  // ★スタート押下後は止める
       return;
     }
 
@@ -152,7 +157,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
         setResetKey(1); 
       }
     }
-  }, [gameState, countdownValue, playSE]);
+  }, [gameState, countdownValue]);
 
   const recordStat = async (wordText: string, isCorrect: boolean) => {
     if (!getToken()) return;

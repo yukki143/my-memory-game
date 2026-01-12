@@ -1,7 +1,8 @@
 // frontend/src/context/BgmContext.tsx
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
-export type BgmScene = 'home' | 'lobby' | 'solo' | 'battle';
+// ★変更: create シーンを追加
+export type BgmScene = 'home' | 'lobby' | 'solo' | 'battle' | 'create';
 
 type BgmContextType = {
   bgmScene: BgmScene;
