@@ -36,6 +36,8 @@ function GameMobile({
 
   const { playSE } = useSound();
   const CLICK_SE = '/sounds/se_click.mp3';
+  const SET_SE = '/sounds/se_set.mp3';
+  const PICK_SE = '/sounds/se_pick.mp3';
   const splitCount = settings?.questionsPerRound || 1;
   const MEMORIZE_TIME = settings?.memorizeTime || 3;
   const ANSWER_TIME = settings?.answerTime || 10;
@@ -255,7 +257,7 @@ function GameMobile({
                         {slots.map((slot, i) => (
                             <button 
                                 key={i} 
-                                onClick={() => {playSE(CLICK_SE); handleTapSlot(i)}} 
+                                onClick={() => {playSE(SET_SE); handleTapSlot(i)}} 
                                 disabled={gameState === 'waiting' || isFetching || isLocked} 
                                 className={`relative w-full p-3 rounded-xl border-4 font-bold text-xl min-h-[60px] transition-all 
                                     ${slot ? 'bg-white border-[#8d6e63] text-[#5d4037]' : 'bg-black/5 border-dashed border-gray-400 text-gray-400'}`}
@@ -285,7 +287,7 @@ function GameMobile({
                             {choices.map((choice) => (
                                 <button 
                                     key={choice.id} 
-                                    onClick={() => handleSelectChoice(choice.id)} 
+                                    onClick={() => {playSE(PICK_SE);handleSelectChoice(choice.id)}} 
                                     disabled={choice.isUsed || gameState === 'waiting' || isFetching || isLocked} 
                                     className={`px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-all
                                         ${choice.isUsed ? 'bg-gray-300 text-gray-500 scale-90 opacity-50' : 
