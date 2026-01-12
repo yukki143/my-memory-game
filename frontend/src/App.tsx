@@ -23,6 +23,8 @@ function App() {
   useEffect(() => {
     const path = location.pathname;
 
+    if (path === '/solo' || path === '/battle') return;
+
     if (path === '/') {
       setBgm('home', false);
       return;
@@ -63,9 +65,7 @@ function App() {
 
   return (
     <>
-      {/* BgmPlayer は Routes の外に配置。
-         URLが変化しても音楽が途切れることなく再生され続けます。
-      */}
+      {/* BgmPlayer は Routes の外に配置 */}
       <BgmPlayer />
 
       <Routes>
