@@ -270,6 +270,8 @@ function Home({ onGameStart }: HomeProps) {
           <div className="grid grid-cols-2 gap-4 h-full">
             <MenuButton text="設定" sub="Customize" onClick={() => {click(); setShowSettings(true)}} />
             <MenuButton text="クリエイト" sub="Make Stage" onClick={() => { click(); handleCreateClick();}} />
+            <MenuButton text="ランキング" sub="Ranking" onClick={() => { click(); navigate('/ranking')}} />
+            <MenuButton text="成績" sub="Stats" onClick={() => { click(); navigate('/stats')}} />
           </div>
         </div>
 

@@ -8,6 +8,8 @@ import Login from './components/Login';
 import Register from './components/Register';     
 import CreateMemorySet from './components/CreateMemorySet'; 
 import MemorySetList from './components/MemorySetList';
+import Ranking from './components/Ranking';
+import Stats from './components/Stats';
 import { BgmPlayer } from './components/BgmPlayer';
 import { type GameSettings } from './types';
 import { useBgm } from './context/BgmContext';
@@ -78,6 +80,8 @@ function App() {
         <Route path="/memory-sets" element={<MemorySetList />} />
         <Route path="/create-set" element={<CreateMemorySet />} />
         <Route path="/edit-set/:id" element={<CreateMemorySet />} />
+        <Route path="/ranking" element={<Ranking />} />
+        <Route path="/stats" element={<Stats />} />
 
         {/* バトル関連 */}
         <Route path="/lobby" element={<BattleLobby />} />
