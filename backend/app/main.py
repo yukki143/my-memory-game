@@ -4,6 +4,7 @@ import os
 import json
 import random
 import uuid
+import statistics
 from typing import List, Dict, Optional, Set
 from datetime import timedelta, datetime
 
@@ -12,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, func
 from sqlalchemy import desc, asc
 from pydantic import BaseModel, Field
@@ -102,6 +103,120 @@ def seed_official_sets():
     finally:
         db.close()
 
+def _period_to_start(period: str) -> Optional[datetime]:
+    """期間フィルタ（UTC）"""
+    if period == "7":
+        return datetime.utcnow() - timedelta(days=7)
+    if period == "30":
+        return datetime.utcnow() - timedelta(days=30)
+    if period == "90":
+        return datetime.utcnow() - timedelta(days=90)
+    return None  # "all"
+
+def _safe_json_loads(s: Optional[str]) -> dict:
+    if not s:
+        return {}
+    if isinstance(s, dict):
+        return s
+    try:
+        return json.loads(s)
+    except Exception:
+        return {}
+
+def _bucket_sort_key(bucket: str) -> int:
+    try:
+        head = bucket.split("-")[0]
+        return int(head)
+    except Exception:
+        return 10**9
+
+def _compute_summary(values: List[float], best: str) -> tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+    """best: 'max' | 'min'"""
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return None, None, None, None
+    best_val = max(vals) if best == "max" else min(vals)
+    avg = sum(vals) / len(vals)
+    med = statistics.median(vals)
+    std = statistics.pstdev(vals) if len(vals) >= 2 else 0.0
+    return best_val, avg, med, std
+
+def _compute_set_summaries(sessions: List[models.PlaySession]) -> List[schemas.StatsSetSummary]:
+    by_set: Dict[str, List[models.PlaySession]] = {}
+    for s in sessions:
+        by_set.setdefault(s.set_id, []).append(s)
+
+    out: List[schemas.StatsSetSummary] = []
+    for set_id, ss in by_set.items():
+        acc = [float(x.accuracy) for x in ss if x.accuracy is not None]
+        time_vals = [float(x.time) for x in ss if x.time is not None]
+        spd = [float(x.avg_speed) for x in ss if x.avg_speed is not None]
+
+        acc_best, acc_avg, acc_med, acc_std = _compute_summary(acc, best="max")
+        time_best, time_avg, time_med, time_std = _compute_summary(time_vals, best="min")
+        spd_best, spd_avg, spd_med, spd_std = _compute_summary(spd, best="min")
+
+        out.append(
+            schemas.StatsSetSummary(
+                set_id=set_id,
+                sessions=len(ss),
+                accuracy_best=acc_best,
+                accuracy_avg=acc_avg,
+                accuracy_median=acc_med,
+                accuracy_std=acc_std,
+                time_best=time_best,
+                time_avg=time_avg,
+                time_median=time_med,
+                time_std=time_std,
+                avg_speed_best=spd_best,
+                avg_speed_avg=spd_avg,
+                avg_speed_median=spd_med,
+                avg_speed_std=spd_std,
+            )
+        )
+
+    out.sort(key=lambda x: x.sessions, reverse=True)
+    return out
+
+def _compute_required_attempts_90(sessions: List[models.PlaySession]) -> tuple[Optional[float], List[schemas.RequiredAttemptsItem]]:
+    """セット別に 'accuracy >= 90' に初到達した attempt_index を算出"""
+    by_set: Dict[str, List[models.PlaySession]] = {}
+    for s in sessions:
+        by_set.setdefault(s.set_id, []).append(s)
+
+    required_values: List[int] = []
+    required_items: List[schemas.RequiredAttemptsItem] = []
+
+    first_map: Dict[str, Optional[int]] = {}
+    for set_id, ss in by_set.items():
+        ss_sorted = sorted(ss, key=lambda x: int(x.attempt_index or 0))
+        first = next((int(x.attempt_index) for x in ss_sorted if float(x.accuracy or 0) >= 90.0), None)
+        first_map[set_id] = first
+        if first is not None:
+            required_values.append(first)
+
+    avg = (sum(required_values) / len(required_values)) if required_values else None
+    for set_id, first in first_map.items():
+        ratio = (first / avg) if (first is not None and avg and avg > 0) else None
+        required_items.append(
+            schemas.RequiredAttemptsItem(
+                set_id=set_id,
+                required_attempts_90=first,
+                ratio_vs_avg=ratio,
+            )
+        )
+
+    required_items.sort(key=lambda x: (x.required_attempts_90 is None, x.required_attempts_90 or 10**9))
+    return avg, required_items
+
+def _period_to_start(period: str) -> Optional[datetime]:
+    if period == "7":
+        return datetime.utcnow() - timedelta(days=7)
+    if period == "30":
+        return datetime.utcnow() - timedelta(days=30)
+    if period == "90":
+        return datetime.utcnow() - timedelta(days=90)
+    return None  # "all"
 
 # --- FastAPIアプリ定義 ---
 app = FastAPI()
@@ -355,6 +470,9 @@ def get_problem(
 
     return {"correct": correct, "options": options}
 
+# ==========================
+#  成績（Stats） API
+# ==========================
 
 @app.post("/api/word_stats")
 def record_word_stat(word_text: str, is_correct: bool, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
@@ -378,6 +496,398 @@ def record_word_stat(word_text: str, is_correct: bool, db: Session = Depends(get
         stat.miss_count += 1
     db.commit()
     return {"status": "ok"}
+
+
+def _safe_json_loads(s: Optional[str]) -> dict:
+    if not s:
+        return {}
+    try:
+        x = json.loads(s)
+        return x if isinstance(x, dict) else {}
+    except Exception:
+        return {}
+
+
+def _bucket_sort_key(bucket: str) -> tuple[int, int]:
+    # "1-2" / "3-4" のようなバケットを想定。壊れていても最後に回す。
+    try:
+        a, b = bucket.split("-", 1)
+        return (int(a), int(b))
+    except Exception:
+        return (10**9, 10**9)
+
+
+def _query_sessions_for_stats(
+    db: Session,
+    user_id: int,
+    modes: List[str],
+    period: str,
+    set_id: Optional[str] = None,
+    opponent_id: Optional[str] = None,
+) -> List[models.PlaySession]:
+    start = _period_to_start(period)
+
+    q = (
+        db.query(models.PlaySession)
+        .options(joinedload(models.PlaySession.aggregate))
+        .filter(
+            models.PlaySession.user_id == user_id,
+            models.PlaySession.mode.in_(modes),
+        )
+    )
+    if start:
+        q = q.filter(models.PlaySession.created_at >= start)
+    if set_id and set_id != "all":
+        q = q.filter(models.PlaySession.set_id == set_id)
+    if opponent_id and opponent_id != "all":
+        try:
+            q = q.filter(models.PlaySession.opponent_user_id == int(opponent_id))
+        except Exception:
+            pass
+
+    return q.order_by(models.PlaySession.created_at.asc()).all()
+
+
+def _compute_set_summaries(sessions: List[models.PlaySession]) -> List[schemas.StatsSetSummary]:
+    by_set: Dict[str, List[models.PlaySession]] = {}
+    for s in sessions:
+        by_set.setdefault(s.set_id, []).append(s)
+
+    out: List[schemas.StatsSetSummary] = []
+    for sid, ss in by_set.items():
+        accs = [float(x.accuracy or 0.0) for x in ss]
+        times = [float(x.time or 0.0) for x in ss if x.time is not None]
+        speeds = [float(x.avg_speed or 0.0) for x in ss if x.avg_speed is not None]
+
+        best_accuracy = max(accs) if accs else None
+        avg_accuracy = (sum(accs) / len(accs)) if accs else None
+        median_accuracy = statistics.median(accs) if accs else None
+        stdev_accuracy = statistics.pstdev(accs) if len(accs) >= 2 else None
+
+        best_time = min(times) if times else None
+        avg_time = (sum(times) / len(times)) if times else None
+        median_time = statistics.median(times) if times else None
+
+        avg_speed = (sum(speeds) / len(speeds)) if speeds else None
+
+        out.append(
+            schemas.StatsSetSummary(
+                set_id=sid,
+                play_count=len(ss),
+                best_accuracy=best_accuracy,
+                avg_accuracy=avg_accuracy,
+                median_accuracy=median_accuracy,
+                stdev_accuracy=stdev_accuracy,
+                best_time=best_time,
+                avg_time=avg_time,
+                median_time=median_time,
+                avg_speed=avg_speed,
+            )
+        )
+
+    out.sort(key=lambda x: (-x.play_count, x.set_id))
+    return out
+
+
+def _compute_required_attempts_90(sessions: List[models.PlaySession]) -> tuple[Optional[float], List[schemas.RequiredAttemptsItem]]:
+    by_set: Dict[str, List[models.PlaySession]] = {}
+    for s in sessions:
+        by_set.setdefault(s.set_id, []).append(s)
+
+    required_values: List[int] = []
+    first_by_set: List[tuple[str, Optional[int]]] = []
+
+    for sid, ss in by_set.items():
+        ss_sorted = sorted(ss, key=lambda x: int(x.attempt_index or 0))
+        first = next((int(x.attempt_index) for x in ss_sorted if float(x.accuracy or 0.0) >= 90.0), None)
+        if first is not None:
+            required_values.append(first)
+        first_by_set.append((sid, first))
+
+    avg = (sum(required_values) / len(required_values)) if required_values else None
+
+    items: List[schemas.RequiredAttemptsItem] = []
+    for sid, first in first_by_set:
+        ratio = (first / avg) if (first is not None and avg and avg > 0) else None
+        items.append(
+            schemas.RequiredAttemptsItem(
+                set_id=sid,
+                required_attempts_90=first,
+                ratio_vs_avg=ratio,
+            )
+        )
+
+    items.sort(key=lambda x: (x.set_id))
+    return avg, items
+
+
+def _stats_response_from_sessions(sessions: List[models.PlaySession]) -> schemas.StatsResponse:
+    set_summaries = _compute_set_summaries(sessions)
+    req_avg, req_items = _compute_required_attempts_90(sessions)
+
+    return schemas.StatsResponse(
+        sessions=[
+            schemas.StatsSeriesPoint(
+                created_at=s.created_at,
+                attempt_index=int(s.attempt_index or 0),
+                time=s.time,
+                accuracy=float(s.accuracy or 0.0),
+                avg_speed=s.avg_speed,
+            )
+            for s in sessions
+        ],
+        set_summaries=set_summaries,
+        required_attempts_avg=req_avg,
+        required_attempts_by_set=req_items,
+    )
+
+
+def _length_stats_from_sessions(sessions: List[models.PlaySession]) -> schemas.LengthStatsResponse:
+    bucket_map: Dict[str, Dict[str, int]] = {}
+
+    for s in sessions:
+        agg = getattr(s, "aggregate", None)
+        if not agg:
+            continue
+        stats = _safe_json_loads(getattr(agg, "length_bucket_stats", None))
+        for bucket, d in stats.items():
+            if not isinstance(d, dict):
+                continue
+            total = int(d.get("total", 0) or 0)
+            incorrect = int(d.get("incorrect", 0) or 0)
+            if bucket not in bucket_map:
+                bucket_map[bucket] = {"total": 0, "incorrect": 0}
+            bucket_map[bucket]["total"] += total
+            bucket_map[bucket]["incorrect"] += incorrect
+
+    items: List[schemas.LengthBucketItem] = []
+    for bucket, d in bucket_map.items():
+        total = int(d["total"])
+        incorrect = int(d["incorrect"])
+        miss_rate = (incorrect / total * 100.0) if total > 0 else 0.0
+        items.append(
+            schemas.LengthBucketItem(
+                bucket=bucket,
+                total=total,
+                incorrect=incorrect,
+                miss_rate=miss_rate,
+            )
+        )
+
+    items.sort(key=lambda x: _bucket_sort_key(x.bucket))
+    return schemas.LengthStatsResponse(buckets=items)
+
+
+def _wrong_chars_from_sessions(
+    sessions: List[models.PlaySession],
+    bucket: str,
+    top_n: int,
+) -> schemas.WrongCharsResponse:
+    counter: Dict[str, int] = {}
+
+    for s in sessions:
+        agg = getattr(s, "aggregate", None)
+        if not agg:
+            continue
+        wrong_map = _safe_json_loads(getattr(agg, "wrong_chars_by_length_bucket", None))
+        per_bucket = wrong_map.get(bucket, {}) if isinstance(wrong_map, dict) else {}
+        if not isinstance(per_bucket, dict):
+            continue
+        for ch, cnt in per_bucket.items():
+            counter[str(ch)] = counter.get(str(ch), 0) + int(cnt or 0)
+
+    top = sorted(counter.items(), key=lambda x: x[1], reverse=True)[: max(top_n, 1)]
+    return schemas.WrongCharsResponse(
+        bucket=bucket,
+        top=[schemas.WrongCharItem(char=c, count=n) for c, n in top],
+    )
+
+
+def _radar_from_sessions(sessions: List[models.PlaySession]) -> schemas.RadarResponse:
+    totals: Dict[str, int] = {"roman": 0, "digit": 0, "kanji": 0, "hiragana": 0, "symbol": 0}
+    incorrects: Dict[str, int] = {"roman": 0, "digit": 0, "kanji": 0, "hiragana": 0, "symbol": 0}
+
+    for s in sessions:
+        agg = getattr(s, "aggregate", None)
+        if not agg:
+            continue
+        m = _safe_json_loads(getattr(agg, "char_type_stats", None))
+        if not isinstance(m, dict):
+            continue
+        for k in totals.keys():
+            d = m.get(k, {})
+            if not isinstance(d, dict):
+                continue
+            totals[k] += int(d.get("total", 0) or 0)
+            incorrects[k] += int(d.get("incorrect", 0) or 0)
+
+    def acc(k: str) -> float:
+        t = totals[k]
+        if t <= 0:
+            return 0.0
+        return (max(t - incorrects[k], 0) / t) * 100.0
+
+    return schemas.RadarResponse(
+        roman=acc("roman"),
+        digit=acc("digit"),
+        kanji=acc("kanji"),
+        hiragana=acc("hiragana"),
+        symbol=acc("symbol"),
+    )
+
+
+@app.post("/api/stats/session", response_model=schemas.PlaySessionResponse)
+def post_stats_session(
+    payload: schemas.PlaySessionCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    max_attempt = (
+        db.query(func.max(models.PlaySession.attempt_index))
+        .filter(
+            models.PlaySession.user_id == current_user.id,
+            models.PlaySession.mode == payload.mode,
+            models.PlaySession.set_id == payload.set_id,
+        )
+        .scalar()
+        or 0
+    )
+    attempt_index = int(max_attempt) + 1
+
+    session = models.PlaySession(
+        user_id=current_user.id,
+        mode=payload.mode,
+        set_id=payload.set_id,
+        time=payload.time,
+        accuracy=payload.accuracy,
+        avg_speed=payload.avg_speed,
+        total_questions=payload.total_questions,
+        result=payload.result,
+        score_for=payload.score_for,
+        score_against=payload.score_against,
+        opponent_user_id=payload.opponent_user_id,
+        room_id=payload.room_id,
+        attempt_index=attempt_index,
+    )
+
+    # TEXT列に入れるので JSON 文字列化して保存
+    agg = models.SessionAggregate(
+        length_bucket_stats=json.dumps(payload.aggregates.length_bucket_stats, ensure_ascii=False),
+        wrong_chars_by_length_bucket=json.dumps(payload.aggregates.wrong_chars_by_length_bucket, ensure_ascii=False),
+        char_type_stats=json.dumps(payload.aggregates.char_type_stats, ensure_ascii=False),
+    )
+    session.aggregate = agg
+
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    return schemas.PlaySessionResponse(
+        id=session.id,
+        user_id=session.user_id,
+        mode=session.mode,
+        set_id=session.set_id,
+        created_at=session.created_at,
+        time=session.time,
+        accuracy=session.accuracy,
+        avg_speed=session.avg_speed,
+        total_questions=session.total_questions,
+        result=session.result,
+        score_for=session.score_for,
+        score_against=session.score_against,
+        opponent_user_id=session.opponent_user_id,
+        room_id=session.room_id,
+        attempt_index=session.attempt_index,
+        aggregates=payload.aggregates,
+    )
+
+
+# --- SOLO ---
+@app.get("/api/stats/solo", response_model=schemas.StatsResponse)
+def get_stats_solo(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
+    return _stats_response_from_sessions(sessions)
+
+@app.get("/api/stats/solo/length", response_model=schemas.LengthStatsResponse)
+def get_stats_solo_length(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
+    return _length_stats_from_sessions(sessions)
+
+@app.get("/api/stats/solo/wrong_chars", response_model=schemas.WrongCharsResponse)
+def get_stats_solo_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = None, top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
+    return _wrong_chars_from_sessions(sessions, bucket=bucket, top_n=top_n)
+
+@app.get("/api/stats/solo/radar", response_model=schemas.RadarResponse)
+def get_stats_solo_radar(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
+    return _radar_from_sessions(sessions)
+
+
+# --- BATTLE ---
+@app.get("/api/stats/battle", response_model=schemas.StatsResponse)
+def get_stats_battle(period: str = "30", set_id: Optional[str] = None, opponent_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["battle"], period, set_id=set_id, opponent_id=opponent_id)
+    return _stats_response_from_sessions(sessions)
+
+@app.get("/api/stats/battle/length", response_model=schemas.LengthStatsResponse)
+def get_stats_battle_length(period: str = "30", set_id: Optional[str] = None, opponent_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["battle"], period, set_id=set_id, opponent_id=opponent_id)
+    return _length_stats_from_sessions(sessions)
+
+@app.get("/api/stats/battle/wrong_chars", response_model=schemas.WrongCharsResponse)
+def get_stats_battle_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = None, opponent_id: Optional[str] = "all", top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["battle"], period, set_id=set_id, opponent_id=opponent_id)
+    return _wrong_chars_from_sessions(sessions, bucket=bucket, top_n=top_n)
+
+@app.get("/api/stats/battle/radar", response_model=schemas.RadarResponse)
+def get_stats_battle_radar(period: str = "30", set_id: Optional[str] = None, opponent_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["battle"], period, set_id=set_id, opponent_id=opponent_id)
+    return _radar_from_sessions(sessions)
+
+
+# --- OVERALL（solo + battle） ---
+@app.get("/api/stats/overall", response_model=schemas.StatsResponse)
+def get_stats_overall(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo", "battle"], period, set_id=set_id)
+    return _stats_response_from_sessions(sessions)
+
+@app.get("/api/stats/overall/length", response_model=schemas.LengthStatsResponse)
+def get_stats_overall_length(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo", "battle"], period, set_id=set_id)
+    return _length_stats_from_sessions(sessions)
+
+@app.get("/api/stats/overall/wrong_chars", response_model=schemas.WrongCharsResponse)
+def get_stats_overall_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = None, top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo", "battle"], period, set_id=set_id)
+    return _wrong_chars_from_sessions(sessions, bucket=bucket, top_n=top_n)
+
+@app.get("/api/stats/overall/radar", response_model=schemas.RadarResponse)
+def get_stats_overall_radar(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["solo", "battle"], period, set_id=set_id)
+    return _radar_from_sessions(sessions)
+
+
+# --- TYPING ---
+@app.get("/api/stats/typing", response_model=schemas.StatsResponse)
+def get_stats_typing(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["typing"], period, set_id=set_id)
+    return _stats_response_from_sessions(sessions)
+
+@app.get("/api/stats/typing/length", response_model=schemas.LengthStatsResponse)
+def get_stats_typing_length(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["typing"], period, set_id=set_id)
+    return _length_stats_from_sessions(sessions)
+
+@app.get("/api/stats/typing/wrong_chars", response_model=schemas.WrongCharsResponse)
+def get_stats_typing_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = None, top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["typing"], period, set_id=set_id)
+    return _wrong_chars_from_sessions(sessions, bucket=bucket, top_n=top_n)
+
+@app.get("/api/stats/typing/radar", response_model=schemas.RadarResponse)
+def get_stats_typing_radar(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    sessions = _query_sessions_for_stats(db, current_user.id, ["typing"], period, set_id=set_id)
+    return _radar_from_sessions(sessions)
 
 
 # ==========================

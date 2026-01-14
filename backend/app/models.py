@@ -70,3 +70,53 @@ class Ranking(Base):
     
     # 同点判定用 (新しい記録を優先)
     created_at = Column(DateTime, default=func.now())
+
+# 成績テーブル
+class PlaySession(Base):
+    __tablename__ = "play_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    mode = Column(String, index=True, nullable=False)  # solo / battle / typing
+    set_id = Column(String, index=True, nullable=False)
+    created_at = Column(DateTime, default=func.now(), index=True)
+
+    # 成長表示用の基本指標
+    time = Column(Float, nullable=True)          # 総クリアタイム（ソロ中心）
+    accuracy = Column(Float, default=0.0)        # %（0-100想定）
+    avg_speed = Column(Float, nullable=True)     # 1問あたり秒など（既存 ranking と合わせる）
+    total_questions = Column(Integer, default=0)
+
+    # battle 向け（nullable）
+    result = Column(String, nullable=True)       # win/lose/draw
+    score_for = Column(Integer, nullable=True)
+    score_against = Column(Integer, nullable=True)
+    opponent_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    room_id = Column(String, nullable=True)
+
+    # ★重要：同一 user_id+mode+set_id の何回目か
+    attempt_index = Column(Integer, default=1, nullable=False)
+
+    # 1:1 集計
+    aggregate = relationship(
+        "SessionAggregate",
+        back_populates="session",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+
+class SessionAggregate(Base):
+    """1セッション内の集計ログ（全文ではなく集計のみを保存）"""
+    __tablename__ = "session_aggregates"
+
+    # 1:1 なので session_id を PK にする
+    session_id = Column(Integer, ForeignKey("play_sessions.id", ondelete="CASCADE"), primary_key=True)
+
+    # Postgresでも今回は TEXT（JSON文字列）で保存（fix_db.py と一致）
+    length_bucket_stats = Column(Text, default="{}")
+    wrong_chars_by_length_bucket = Column(Text, default="{}")
+    char_type_stats = Column(Text, default="{}")
+
+    session = relationship("PlaySession", back_populates="aggregate")
