@@ -130,6 +130,13 @@ export default function CreateMemorySet() {
     setShowSuccessModal(false);
   };
 
+  // 秒を「分:秒」形式に変換するヘルパー例
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m > 0 ? `${m}分${s > 0 ? s + '秒' : ''}` : `${s}秒`;
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center font-bold">読み込み中...</div>;
 
   return (
@@ -166,10 +173,10 @@ export default function CreateMemorySet() {
                 <div>
                   <label className="block font-bold mb-1 text-sm">暗記時間 (秒)</label>
                   <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="10" step="1" 
+                    <input type="range" min="1" max="900" step="1" 
                       className="w-full accent-[#8d6e63]"
                       value={memorizeTime} onChange={e => setMemorizeTime(Number(e.target.value))} />
-                    <span className="font-black text-2xl w-10 text-right">{memorizeTime}</span>
+                    <span className="font-black text-2xl w-10 text-right">{formatTime(memorizeTime)}</span>
                   </div>
                 </div>
 
@@ -177,10 +184,10 @@ export default function CreateMemorySet() {
                 <div>
                   <label className="block font-bold mb-1 text-sm">回答時間 (秒)</label>
                   <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="30" step="1" 
+                    <input type="range" min="1" max="900" step="1" 
                       className="w-full accent-[#8d6e63]"
                       value={answerTime} onChange={e => setAnswerTime(Number(e.target.value))} />
-                    <span className="font-black text-2xl w-10 text-right">{answerTime}</span>
+                    <span className="font-black text-2xl w-10 text-right">{formatTime(answerTime)}</span>
                   </div>
                 </div>
 
