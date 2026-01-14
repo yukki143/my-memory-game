@@ -8,7 +8,6 @@ import { DEFAULT_SETTINGS } from '../types';
 import { useSound } from '../hooks/useSound';
 
 // 公式テンプレート (固定データ)
-// ★修正: IDをバックエンドの DEFAULT_MEMORY_SETS と一致させる
 const OFFICIAL_SETS: MemorySet[] = [
   { id: "default", name: "基本セット (フルーツ)", title: "基本セット (フルーツ)", words: new Array(11) },
   { id: "programming", name: "プログラミング用語", title: "プログラミング用語", words: new Array(6) },
@@ -20,28 +19,69 @@ export default function MemorySetList() {
   const navigate = useNavigate();
   const { playSE } = useSound();
   const CLICK_SE = '/sounds/se_click.mp3';
-  const [mySets, setMySets] = useState<MemorySet[]>([]);
+  const [allSets, setAllSets] = useState<MemorySet[]>([]); // すべてのセットを保持
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null); // 自分のID
   const [loading, setLoading] = useState(true);
 
+  // const [mySets, setMySets] = useState<MemorySet[]>([]);
+  const mySets = allSets.filter(s => s.owner_id === currentUserId && !s.is_official);
+  const publicSets = allSets.filter(s => s.is_public && s.owner_id !== currentUserId && !s.is_official);
+
   useEffect(() => {
-    fetchMySets();
+    const init = async () => {
+      setLoading(true);
+      // ユーザー情報とセット一覧を並行して取得
+      await Promise.all([fetchUser(), fetchAllSets()]);
+      setLoading(false);
+    };
+    init();
   }, []);
 
-  const fetchMySets = async () => {
+  // 自分のユーザー情報を取得してIDを保存
+  const fetchUser = async () => {
+    try {
+      const res = await authFetch("/api/users/me");
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentUserId(data.id); // データベース上のユーザーIDをセット
+      }
+    } catch (e) {
+      console.error("User fetch failed", e);
+    }
+  };
+
+  // 自分のセット＋公開セットをまとめて取得
+  const fetchAllSets = async () => {
     try {
       const res = await authFetch("/api/my-sets");
       if (res.ok) {
         const data = await res.json();
-        setMySets(data);
-      } else {
-        console.error("Failed to fetch sets");
+        setAllSets(data); // バックエンドから返ってきたリストを保存
       }
     } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+      console.error("Sets fetch failed", e);
     }
   };
+  
+  // useEffect(() => {
+  //   fetchMySets();
+  // }, []);
+
+  // const fetchMySets = async () => {
+  //   try {
+  //     const res = await authFetch("/api/my-sets");
+  //     if (res.ok) {
+  //       const data = await res.json();
+  //       setMySets(data);
+  //     } else {
+  //       console.error("Failed to fetch sets");
+  //     }
+  //   } catch (e) {
+  //     console.error(e);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   // 編集画面へ遷移
   const handleEdit = (id: string | number) => {
@@ -165,6 +205,39 @@ export default function MemorySetList() {
                 </button>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* ★追加：パブリックメモリーセットのセクション */}
+        <section className="mb-8">
+          <h2 className="text-xl font-bold mb-4 px-2 flex items-center gap-2 text-[#5d4037]">
+            <span>🌐</span> みんなの公開セット
+          </h2>
+          <div className="grid gap-3">
+            {publicSets.length > 0 ? (
+              publicSets.map((set) => (
+                <div key={set.id} className="bg-white/90 p-4 rounded-xl shadow-sm border-2 border-blue-100 flex justify-between items-center hover:border-blue-300 transition-colors">
+                  <div>
+                    <h3 className="font-bold text-[#5d4037]">{set.title}</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">PUBLIC</span>
+                      <span className="text-xs opacity-60 text-[#8d6e63]">📚 {set.words?.length}語</span>
+                      {/* 作成者名を表示したい場合は backend/app/routers/memory_sets.py で owner 名を返すように修正が必要です */}
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => handlePlaySolo(set)}
+                    className="bg-blue-500 text-white px-4 py-2 rounded-xl font-black shadow-sm hover:bg-blue-600 hover:scale-105 transition"
+                  >
+                    ▶ PLAY
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-8 bg-white/50 rounded-xl border-2 border-dashed border-gray-300">
+                <p className="text-gray-400 font-bold">公開されているセットはまだありません</p>
+              </div>
+            )}
           </div>
         </section>
 

@@ -28,6 +28,7 @@ class MemorySet(Base):
     memorize_time = Column(Integer, default=3)
     answer_time = Column(Integer, default=10)
     questions_per_round = Column(Integer, default=1)
+    is_public = Column(Boolean, default=False)
     win_score = Column(Integer, default=10)
     condition_type = Column(String, default="score")
     

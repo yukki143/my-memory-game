@@ -20,8 +20,9 @@ export default function CreateMemorySet() {
 
   const [title, setTitle] = useState("");
   const [memorizeTime, setMemorizeTime] = useState(3);
-  const [answerTime, setAnswerTime] = useState(10); // ★追加: 回答制限時間のステート
+  const [answerTime, setAnswerTime] = useState(10); // 回答制限時間のステート
   const [questionsPerRound, setQuestionsPerRound] = useState(1);
+  const [isPublic, setIsPublic] = useState(false);
   const [winScore, setWinScore] = useState(10);
   const [conditionType, setConditionType] = useState<'score' | 'total'>('score');
   const [orderType, setOrderType] = useState('random');
@@ -51,6 +52,7 @@ export default function CreateMemorySet() {
       if (data.memorize_time) setMemorizeTime(data.memorize_time);
       if (data.answer_time) setAnswerTime(data.answer_time); // ★追加: 回答時間をロード
       if (data.questions_per_round) setQuestionsPerRound(data.questions_per_round);
+      if (data.is_public !== undefined) setIsPublic(data.is_public);
       if (data.win_score) setWinScore(data.win_score);
       if (data.condition_type) setConditionType(data.condition_type as 'score' | 'total');
       if (data.order_type) setOrderType(data.order_type);
@@ -95,6 +97,7 @@ export default function CreateMemorySet() {
             memorize_time: memorizeTime,
             answer_time: answerTime, // ★追加: 回答時間を送信
             questions_per_round: questionsPerRound,
+            is_public: isPublic,
             win_score: winScore,
             condition_type: conditionType,
             order_type: orderType
@@ -130,12 +133,33 @@ export default function CreateMemorySet() {
     setShowSuccessModal(false);
   };
 
+// 0秒〜900秒（15分）の間に制限する関数
+const clampTime = (totalSeconds: number): number => {
+  return Math.max(0, Math.min(900, totalSeconds));
+};
+
+// 分・秒の入力変更時の処理
+const handleTimeInput = (
+  currentValue: number, 
+  type: 'min' | 'sec', 
+  newValue: string, 
+  setter: (val: number) => void
+) => {
+  // 数字以外を排除（空文字は0として扱う）
+  const numValue = newValue === "" ? 0 : parseInt(newValue.replace(/[^0-9]/g, ""), 10);
+  
+  const m = type === 'min' ? numValue : Math.floor(currentValue / 60);
+  const s = type === 'sec' ? numValue : currentValue % 60;
+  
+  setter(clampTime(m * 60 + s));
+};
+
   // 秒を「分:秒」形式に変換するヘルパー例
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return m > 0 ? `${m}分${s > 0 ? s + '秒' : ''}` : `${s}秒`;
-  };
+  // const formatTime = (seconds: number) => {
+  //   const m = Math.floor(seconds / 60);
+  //   const s = seconds % 60;
+  //   return m > 0 ? `${m}分${s > 0 ? s + '秒' : ''}` : `${s}秒`;
+  // };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center font-bold">読み込み中...</div>;
 
@@ -168,9 +192,88 @@ export default function CreateMemorySet() {
               <div className="absolute -right-4 -top-4 text-6xl opacity-10">⚙️</div>
               <h3 className="font-black text-lg mb-4 flex items-center gap-2">ゲームルール設定</h3>
               
-              <div className="space-y-6">
-                {/* 暗記時間 */}
+              <div className="border-t-2 border-[#d7ccc8] pt-4">
+                <label className="block font-bold mb-2 text-sm">公開範囲</label>
+                <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden">
+                  <button 
+                    onClick={() => { click(); setIsPublic(false)}} 
+                    className={`flex-1 py-2 font-bold transition ${!isPublic ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
+                  >
+                    🔒 プライベート
+                  </button>
+                  <button 
+                    onClick={() => { click(); setIsPublic(true)}} 
+                    className={`flex-1 py-2 font-bold transition ${isPublic ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
+                  >
+                    🌐 パブリック
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 px-1">
+                  ※パブリックに設定すると、他のプレイヤーもこのセットを遊べるようになります。
+                </p>
+              </div>
+              
+              <div className="space-y-6 mt-5">
+                {/* 暗記時間設定 */}
                 <div>
+                  <label className="block font-bold text-sm">暗記時間</label>
+                  <div className="flex flex-col sm:flex-row items-center gap-4 bg-transparent p-3">
+                    <input 
+                      type="range" min="0" max="900" step="1" 
+                      className="w-full accent-[#8d6e63] cursor-pointer"
+                      value={memorizeTime} 
+                      onChange={e => setMemorizeTime(Number(e.target.value))} 
+                    />
+                    <div className="flex items-center gap-1 shrink-0 font-black text-[#5d4037]">
+                      <input 
+                        type="number"
+                        className="w-16 p-1 border-2 border-[#8d6e63] rounded-lg text-center bg-white focus:ring-2 focus:ring-[#8d6e63] outline-none"
+                        value={Math.floor(memorizeTime / 60)}
+                        onChange={e => handleTimeInput(memorizeTime, 'min', e.target.value, setMemorizeTime)}
+                      />
+                      <span className="text-sm">分</span>
+                      <input 
+                        type="number"
+                        className="w-16 p-1 border-2 border-[#8d6e63] rounded-lg text-center bg-white focus:ring-2 focus:ring-[#8d6e63] outline-none"
+                        value={memorizeTime % 60}
+                        onChange={e => handleTimeInput(memorizeTime, 'sec', e.target.value, setMemorizeTime)}
+                      />
+                      <span className="text-sm">秒</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 回答時間設定 */}
+                <div className="mt-4">
+                  <label className="block font-bold text-sm">回答時間</label>
+                  <div className="flex flex-col sm:flex-row items-center gap-4 bg-transparent p-3">
+                    <input 
+                      type="range" min="0" max="900" step="1" 
+                      className="w-full accent-[#8d6e63] cursor-pointer"
+                      value={answerTime} 
+                      onChange={e => setAnswerTime(Number(e.target.value))} 
+                    />
+                    <div className="flex items-center gap-1 shrink-0 font-black text-[#5d4037]">
+                      <input 
+                        type="number"
+                        className="w-16 p-1 border-2 border-[#8d6e63] rounded-lg text-center bg-white focus:ring-2 focus:ring-[#8d6e63] outline-none"
+                        value={Math.floor(answerTime / 60)}
+                        onChange={e => handleTimeInput(answerTime, 'min', e.target.value, setAnswerTime)}
+                      />
+                      <span className="text-sm">分</span>
+                      <input 
+                        type="number"
+                        className="w-16 p-1 border-2 border-[#8d6e63] rounded-lg text-center bg-white focus:ring-2 focus:ring-[#8d6e63] outline-none"
+                        value={answerTime % 60}
+                        onChange={e => handleTimeInput(answerTime, 'sec', e.target.value, setAnswerTime)}
+                      />
+                      <span className="text-sm">秒</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 暗記時間 */}
+                {/* <div>
                   <label className="block font-bold mb-1 text-sm">暗記時間 (秒)</label>
                   <div className="flex items-center gap-2">
                     <input type="range" min="1" max="900" step="1" 
@@ -178,10 +281,10 @@ export default function CreateMemorySet() {
                       value={memorizeTime} onChange={e => setMemorizeTime(Number(e.target.value))} />
                     <span className="font-black text-2xl w-10 text-right">{formatTime(memorizeTime)}</span>
                   </div>
-                </div>
+                </div> */}
 
                 {/* ★追加: 回答時間 */}
-                <div>
+                {/* <div>
                   <label className="block font-bold mb-1 text-sm">回答時間 (秒)</label>
                   <div className="flex items-center gap-2">
                     <input type="range" min="1" max="900" step="1" 
@@ -189,7 +292,7 @@ export default function CreateMemorySet() {
                       value={answerTime} onChange={e => setAnswerTime(Number(e.target.value))} />
                     <span className="font-black text-2xl w-10 text-right">{formatTime(answerTime)}</span>
                   </div>
-                </div>
+                </div> */}
 
                 {/* 問題数 */}
                 <div>
@@ -229,16 +332,15 @@ export default function CreateMemorySet() {
                   </div>
                 </div>
 
-                <div className="border-t-2 border-[#d7ccc8] pt-4">
-                  <label className="block font-bold mb-2 text-sm">ゲーム終了条件</label>
-                  <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden mb-3">
-                    <button onClick={() => { click(); setConditionType('score')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>正解数</button>
-                    <button onClick={() => { click(); setConditionType('total')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>出題数</button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input type="number" className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" value={winScore} onChange={(e) => setWinScore(Number(e.target.value))} />
-                    <span className="text-xs font-bold shrink-0">{conditionType === 'score' ? '問正解' : '問プレイ'}</span>
-                  </div>
+                
+                <label className="block font-bold mb-2 text-sm">ゲーム終了条件</label>
+                <div className="flex bg-white rounded-lg border-2 border-[#d7ccc8] overflow-hidden mb-3">
+                  <button onClick={() => { click(); setConditionType('score')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'score' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>正解数</button>
+                  <button onClick={() => { click(); setConditionType('total')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>出題数</button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input type="number" className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" value={winScore} onChange={(e) => setWinScore(Number(e.target.value))} />
+                  <span className="text-xs font-bold shrink-0">{conditionType === 'score' ? '問正解' : '問プレイ'}</span>
                 </div>
               </div>
             </div>
@@ -256,7 +358,6 @@ export default function CreateMemorySet() {
             ))}
             <button onClick={() => { click(); addRow();}} className="w-full py-4 border-4 border-dashed border-[#8d6e63] text-[#8d6e63] rounded-2xl font-black hover:bg-white/50 transition">＋ 行を追加</button>
           </div>
-
         </div>
       </div>
 

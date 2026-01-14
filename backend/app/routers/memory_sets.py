@@ -19,6 +19,7 @@ def get_memory_sets(current_user: models.User = Depends(get_current_user), db: S
     db_sets = db.query(models.MemorySet).filter(
         or_(
             models.MemorySet.is_official == True,
+            models.MemorySet.is_public == True,
             models.MemorySet.owner_id == current_user.id
         )
     ).all()
@@ -28,15 +29,28 @@ def get_memory_sets(current_user: models.User = Depends(get_current_user), db: S
 # 自分のメモリーセット一覧取得
 @router.get("/my-sets", response_model=List[schemas.MemorySetResponse])
 def read_my_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sets = db.query(models.MemorySet).filter(models.MemorySet.owner_id == current_user.id).all()
+    # 自分のセット または 公開されているセット を取得
+    sets = db.query(models.MemorySet).filter(
+        or_(
+            models.MemorySet.owner_id == current_user.id,
+            models.MemorySet.is_public == True
+        )
+    ).all()
+    
     results = []
     for s in sets:
         results.append({
-            "id": s.id, "title": s.title, "owner_id": s.owner_id,
-            "memorize_time": s.memorize_time, "answer_time": s.answer_time,
-            "questions_per_round": s.questions_per_round, "win_score": s.win_score,
-            "condition_type": s.condition_type, "order_type": s.order_type,
+            "id": s.id, 
+            "title": s.title, 
+            "owner_id": s.owner_id,
+            "memorize_time": s.memorize_time, 
+            "answer_time": s.answer_time,
+            "questions_per_round": s.questions_per_round, 
+            "win_score": s.win_score,
+            "condition_type": s.condition_type, 
+            "order_type": s.order_type,
             "is_official": s.is_official,
+            "is_public": s.is_public,  # ★ここを追加
             "words": json.loads(s.words_json) if s.words_json else []
         })
     return results
@@ -54,6 +68,7 @@ def create_memory_set(item: schemas.MemorySetCreate, current_user: models.User =
         memorize_time=item.memorize_time, 
         answer_time=item.answer_time,
         questions_per_round=item.questions_per_round, 
+        is_public=item.is_public,
         win_score=item.win_score,
         condition_type=item.condition_type, 
         order_type=item.order_type,
@@ -101,6 +116,7 @@ def update_memory_set(
     db_set.memorize_time = item.memorize_time
     db_set.answer_time = item.answer_time
     db_set.questions_per_round = item.questions_per_round
+    db_set.is_public = item.is_public
     db_set.win_score = item.win_score
     db_set.condition_type = item.condition_type
     db_set.order_type = item.order_type

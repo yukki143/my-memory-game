@@ -13,11 +13,14 @@ export type MemorySet = {
   title?: string;
   words?: Problem[];
   memorize_time?: number;
-  answer_time?: number; // ★追加
+  answer_time?: number;
   questions_per_round?: number;
   win_score?: number;
   condition_type?: 'score' | 'total';
   order_type?: 'random' | 'sequential' | 'review';
+  owner_id?: number | null; 
+  is_public?: boolean;
+  is_official?: boolean;
 };
 
 export type GameSettings = {

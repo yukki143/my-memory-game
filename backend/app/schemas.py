@@ -16,10 +16,12 @@ class MemorySetBase(BaseModel):
     memorize_time: int = 3
     answer_time: int = 10 
     questions_per_round: int = 1
+    is_public: bool = False
     win_score: int = 10
     condition_type: str = "score" # 'score' (正解数) または 'total' (出題数)
     order_type: str = "random"    # 'random', 'review' (苦手優先), 'sequential'
     is_official: bool = False 
+    is_public: bool = False
 
 class MemorySetCreate(MemorySetBase):
     """メモリーセット作成用"""

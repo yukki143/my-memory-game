@@ -18,6 +18,9 @@ def migrate():
             conn.execute(text(
                 "ALTER TABLE memory_sets ADD COLUMN IF NOT EXISTS answer_time INTEGER DEFAULT 10;"
             ))
+            conn.execute(text(
+                "ALTER TABLE memory_sets ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;"
+            ))
             
             # --- 2. rankings テーブルの修正 (新しい評価指標の追加) ---
             print("Checking 'rankings' columns for evaluation metrics...")
