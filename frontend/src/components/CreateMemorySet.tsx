@@ -339,7 +339,19 @@ const handleTimeInput = (
                   <button onClick={() => { click(); setConditionType('total')}} className={`flex-1 py-2 font-bold transition ${conditionType === 'total' ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}>出題数</button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input type="number" className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" value={winScore} onChange={(e) => setWinScore(Number(e.target.value))} />
+                  <input 
+                    type="number" 
+                    min="0"                // UI上の最小値を0に設定
+                    max="5000"             // UI上の最大値を5000に設定
+                    className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" 
+                    value={winScore} 
+                    onChange={(e) => {
+                      // 入力値を数値に変換
+                      const val = Number(e.target.value);
+                      // 0未満は0に、5000超は5000に制限（クランプ処理）
+                      setWinScore(Math.max(0, Math.min(5000, val)));
+                    }} 
+                  />
                   <span className="text-xs font-bold shrink-0">{conditionType === 'score' ? '問正解' : '問プレイ'}</span>
                 </div>
               </div>

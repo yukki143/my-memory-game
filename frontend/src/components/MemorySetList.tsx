@@ -19,13 +19,27 @@ export default function MemorySetList() {
   const navigate = useNavigate();
   const { playSE } = useSound();
   const CLICK_SE = '/sounds/se_click.mp3';
+
+  // ステートの定義
   const [allSets, setAllSets] = useState<MemorySet[]>([]); // すべてのセットを保持
   const [currentUserId, setCurrentUserId] = useState<number | null>(null); // 自分のID
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  // const [mySets, setMySets] = useState<MemorySet[]>([]);
-  const mySets = allSets.filter(s => s.owner_id === currentUserId && !s.is_official);
-  const publicSets = allSets.filter(s => s.is_public && s.owner_id !== currentUserId && !s.is_official);
+  // キーワードに一致するか判定するヘルパー関数
+  const matchesSearch = (set: MemorySet) => {
+    const term = searchTerm.toLowerCase();
+    return (
+      set.title?.toLowerCase().includes(term) || 
+      set.name?.toLowerCase().includes(term)
+    );
+  };
+
+  // フィルタリングされたリストの作成
+  const mySets = allSets.filter(s => s.owner_id === currentUserId && !s.is_official && matchesSearch(s));
+  const publicSets = allSets.filter(s => s.is_public && s.owner_id !== currentUserId && !s.is_official && matchesSearch(s));
+  const filteredOfficialSets = OFFICIAL_SETS.filter(s => matchesSearch(s));
+  
 
   useEffect(() => {
     const init = async () => {
@@ -62,26 +76,6 @@ export default function MemorySetList() {
       console.error("Sets fetch failed", e);
     }
   };
-  
-  // useEffect(() => {
-  //   fetchMySets();
-  // }, []);
-
-  // const fetchMySets = async () => {
-  //   try {
-  //     const res = await authFetch("/api/my-sets");
-  //     if (res.ok) {
-  //       const data = await res.json();
-  //       setMySets(data);
-  //     } else {
-  //       console.error("Failed to fetch sets");
-  //     }
-  //   } catch (e) {
-  //     console.error(e);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
 
   // 編集画面へ遷移
   const handleEdit = (id: string | number) => {
@@ -136,6 +130,28 @@ export default function MemorySetList() {
           <span>＋</span><span>新しいメモリーセットを作る</span>
         </button>
 
+        {/* ★追加：検索バー */}
+        <div className="relative w-full mt-4">
+          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+            <span className="text-xl">🔍</span>
+          </div>
+          <input
+            type="text"
+            placeholder="セット名で検索..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 bg-white/80 border-2 border-[#d7ccc8] rounded-2xl font-bold focus:border-[#8d6e63] outline-none shadow-inner transition-all"
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => { playSE(CLICK_SE); setSearchTerm(""); }}
+              className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
         {/* 自分のメモリーセット */}
         <section>
           <h2 className="text-xl font-bold mb-4 px-2 flex items-center gap-2">
@@ -188,7 +204,7 @@ export default function MemorySetList() {
             <span>✨</span> 公式テンプレート
           </h2>
           <div className="grid gap-3 opacity-90">
-            {OFFICIAL_SETS.map((set) => (
+            {filteredOfficialSets.map((set) => (
               <div key={set.id} className="bg-green-50/90 p-4 rounded-xl shadow-sm border-2 border-green-200 flex justify-between items-center">
                 <div>
                     <h3 className="font-bold text-green-900">{set.name}</h3>
