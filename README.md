@@ -1,4 +1,5 @@
-# BrainGarden (https://braingarden.onrender.com)
+# BrainGarden 
+https://braingarden.onrender.com
 
 <p align="center">
   <b>暗記を「勉強」から「ゲーム」へ。</b><br>
