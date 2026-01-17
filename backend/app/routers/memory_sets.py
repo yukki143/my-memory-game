@@ -15,7 +15,7 @@ router = APIRouter(
 # ルーム作成時の選択用リスト取得
 @router.get("/sets")
 def get_memory_sets(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # 公式セット または 自分が作成したセット のみ取得
+    # 公式セット、公開セット、または自分が作成したセットを取得
     db_sets = db.query(models.MemorySet).filter(
         or_(
             models.MemorySet.is_official == True,
@@ -24,7 +24,17 @@ def get_memory_sets(current_user: models.User = Depends(get_current_user), db: S
         )
     ).all()
     
-    return [{"id": str(s.id), "name": s.title} for s in db_sets]
+    # 修正：判定に必要な情報をすべて含めて返す
+    return [
+        {
+            "id": str(s.id), 
+            "name": s.title,
+            "owner_id": s.owner_id,      # フロントエンドの判定に必要
+            "is_official": s.is_official, # フロントエンドの判定に必要
+            "is_public": s.is_public      # 今後の拡張のために含めておくと安全
+        } 
+        for s in db_sets
+    ]
 
 # 自分のメモリーセット一覧取得
 @router.get("/my-sets", response_model=List[schemas.MemorySetResponse])

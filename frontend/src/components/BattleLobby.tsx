@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ForestPath from './ForestPath';
 import { type RoomInfo } from '../types';
@@ -9,9 +9,21 @@ import { useSound } from '../hooks/useSound';
 // APIの場所 (環境に合わせて変更してください)
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+// カテゴリの型を定義
+export type MemorySetCategory = 'private' | 'official' | 'public';
+
+// MemorySetOption 型を拡張
 type MemorySetOption = {
   id: string;
   name: string;
+  category: MemorySetCategory; // カテゴリを追加
+};
+
+// --- 型定義の下、コンポーネントの外に配置 ---
+const CATEGORY_PRIORITY: Record<string, number> = {
+  private: 1,
+  official: 2,
+  public: 3,
 };
 
 export default function BattleLobby() {
@@ -19,6 +31,7 @@ export default function BattleLobby() {
   const { setBgm } = useBgm();
   const [rooms, setRooms] = useState<RoomInfo[]>([]);
   const [playerName, setPlayerName] = useState("Loading...");
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const { playSE } = useSound();
@@ -38,33 +51,97 @@ export default function BattleLobby() {
 
   const [myOwnedRooms, setMyOwnedRooms] = useState<string[]>([]);
 
+  // メモリーセットをカテゴリごとにグループ化
+  const groupedSets = useMemo(() => {
+    return {
+      private: memorySets.filter(s => s.category === 'private'),
+      official: memorySets.filter(s => s.category === 'official'),
+      public: memorySets.filter(s => s.category === 'public'),
+    };
+  }, [memorySets]);
+
+  // カテゴリに応じたアイコンを返すヘルパー
+  const getCategoryIcon = (category: MemorySetCategory) => {
+    switch (category) {
+      case 'private': return '🔒';
+      case 'official': return '✨';
+      case 'public': return '🌐';
+      default: return '';
+    }
+  };
+
   // 初回ロード時にルーム一覧とセット一覧を取得
   useEffect(() => {
     setBgm('lobby', false); 
     fetchRooms();
-    fetchMemorySets();
     loadOwnedRooms();
-    fetchMyProfile();
+
+    // ユーザー情報とセット情報を順番に取得・処理する関数
+    const fetchInitialData = async () => {
+      try {
+        // 1. ユーザー情報を取得して自分のIDを特定
+        const userRes = await authFetch("/api/users/me");
+        let myId: number | null = null;
+        if (userRes.ok) {
+          const userData = await userRes.json();
+          setPlayerName(userData.username);
+          setCurrentUserId(userData.id);
+          myId = userData.id;
+        } else {
+          setPlayerName("Guest");
+        }
+
+        // 2. メモリーセットを取得
+        const setsRes = await authFetch("/api/sets");
+        if (setsRes.ok) {
+          const db_sets = await setsRes.json();
+
+          // 3. カテゴリの割り当てとマッピング
+          const processedSets: MemorySetOption[] = db_sets.map((s: any) => {
+            let category: MemorySetCategory = 'public';
+            
+            if (myId !== null && s.owner_id === myId) {
+              category = 'private';
+            } else if (s.is_official) {
+              category = 'official';
+            }
+
+            return {
+              id: String(s.id),
+              name: s.title || s.name,
+              category: category
+            };
+          });
+
+          // 4. ソートの実行 (優先度順、同じ優先度なら名前順)
+          processedSets.sort((a, b) => {
+            const priorityA = CATEGORY_PRIORITY[a.category];
+            const priorityB = CATEGORY_PRIORITY[b.category];
+
+            if (priorityA !== priorityB) {
+              return priorityA - priorityB;
+            }
+            return a.name.localeCompare(b.name);
+          });
+
+          setMemorySets(processedSets);
+          
+          // 初期選択ロジック: リストが存在し、未選択なら先頭を選択
+          if (processedSets.length > 0 && (selectedSetId === "default" || !selectedSetId)) {
+            setSelectedSetId(processedSets[0].id);
+          }
+        }
+      } catch (e) {
+        console.error("Initial fetch error", e);
+      }
+    };
+
+    fetchInitialData();
     
     // 3秒ごとにポーリング（自動更新）
     const interval = setInterval(fetchRooms, 3000); 
     return () => clearInterval(interval);
-  }, [setBgm]);
-
-  const fetchMyProfile = async () => {
-    try {
-      const res = await authFetch("/api/users/me");
-      if (res.ok) {
-        const data = await res.json();
-        setPlayerName(data.username);
-      } else {
-        setPlayerName("Guest");
-      }
-    } catch (e) {
-      console.error("Profile fetch error", e);
-      setPlayerName("Guest");
-    }
-  };
+  }, [setBgm]); // selectedSetId は依存配列に入れない（無限ループ防止）
 
   const loadOwnedRooms = () => {
     const keys = Object.keys(localStorage);
@@ -87,23 +164,6 @@ export default function BattleLobby() {
       }
     } catch (e) {
       console.error("Room fetch error:", e);
-    }
-  };
-
-  // ★修正：初期値のフォールバックを防ぐための初期選択ロジック
-  const fetchMemorySets = async () => {
-    try {
-      const res = await authFetch("/api/sets");
-      if (res.ok) {
-        const data = await res.json();
-        setMemorySets(data);
-        // リストが存在し、かつ現在が "default" のままなら、最初のセットを選択状態にする
-        if (data.length > 0 && (selectedSetId === "default" || !selectedSetId)) {
-          setSelectedSetId(data[0].id);
-        }
-      }
-    } catch (e) {
-      console.error("Sets fetch error:", e);
     }
   };
 
@@ -365,18 +425,45 @@ export default function BattleLobby() {
                     </div>
                     
                     <div>
-                        <label className="block font-bold mb-1 text-sm">使用するメモリーセット</label>
-                        <select 
-                            className="w-full p-3 border-2 border-[#d7ccc8] rounded-lg font-bold bg-white focus:outline-none focus:border-[#8d6e63]"
-                            value={selectedSetId}
-                            onChange={e => setSelectedSetId(e.target.value)}
-                        >
-                            {memorySets.map(set => (
-                                <option key={set.id} value={set.id}>
-                                    {set.name}
-                                </option>
-                            ))}
-                        </select>
+                      <label className="block font-bold mb-1 text-sm">使用するメモリーセット</label>
+                      <select 
+                          className="w-full p-3 border-2 border-[#d7ccc8] rounded-lg font-bold bg-white focus:outline-none focus:border-[#8d6e63]"
+                          value={selectedSetId}
+                          onChange={e => setSelectedSetId(e.target.value)}
+                      >
+                          {/* 自分のセット */}
+                          {groupedSets.private.length > 0 && (
+                              <optgroup label="マイメモリーセット">
+                                  {groupedSets.private.map(set => (
+                                      <option key={set.id} value={set.id}>
+                                          {getCategoryIcon(set.category)} {set.name}
+                                      </option>
+                                  ))}
+                              </optgroup>
+                          )}
+
+                          {/* 公式セット */}
+                          {groupedSets.official.length > 0 && (
+                              <optgroup label="公式テンプレート">
+                                  {groupedSets.official.map(set => (
+                                      <option key={set.id} value={set.id}>
+                                          {getCategoryIcon(set.category)} {set.name}
+                                      </option>
+                                  ))}
+                              </optgroup>
+                          )}
+
+                          {/* 公開セット */}
+                          {groupedSets.public.length > 0 && (
+                              <optgroup label="公開セット">
+                                  {groupedSets.public.map(set => (
+                                      <option key={set.id} value={set.id}>
+                                          {getCategoryIcon(set.category)} {set.name}
+                                      </option>
+                                  ))}
+                              </optgroup>
+                          )}
+                      </select>
                     </div>
 
                     <div>

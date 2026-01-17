@@ -155,7 +155,7 @@ export default function MemorySetList() {
         {/* 自分のメモリーセット */}
         <section>
           <h2 className="text-xl font-bold mb-4 px-2 flex items-center gap-2">
-            <span>🌾</span> マイガーデン
+            <span>🔒</span> マイメモリーセット
           </h2>
           <div className="grid gap-3">
               {mySets.length === 0 && !loading && (

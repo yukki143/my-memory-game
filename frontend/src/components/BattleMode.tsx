@@ -45,6 +45,13 @@ function BattleMode() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!location.state || !location.state.roomId) {
+      alert("無効なアクセスです。ロビーから入室してください。");
+      navigate('/lobby');
+    }
+  }, [location, navigate]);
+
   const { 
       roomId = "room1", 
       playerName = "Guest",
@@ -252,10 +259,18 @@ function BattleMode() {
         }
       };
 
-      ws.onclose = () => { 
+      ws.onclose = (event) => { 
         if (!isMounted) return;
         setIsConnected(false);
-        // ★ 依存配列から削った代わりに、ここで現在の状態を見て再接続を判断
+
+        // サーバーが「ルームなし」で閉じた場合は再接続しない
+        if (event.code === 4000) {
+          alert("ルームが見つからないか、すでに終了しています。");
+          navigate('/lobby');
+          return;
+        }
+
+        // それ以外の切断（ネットワークエラー等）は再接続
         reconnectTimeout = setTimeout(joinRoom, 1500);
       };
     };
