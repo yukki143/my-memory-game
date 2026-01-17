@@ -199,7 +199,7 @@ const handleTimeInput = (
                     onClick={() => { click(); setIsPublic(false)}} 
                     className={`flex-1 py-2 font-bold transition ${!isPublic ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
                   >
-                    🔒 プライベート
+                    🍀 プライベート
                   </button>
                   <button 
                     onClick={() => { click(); setIsPublic(true)}} 
