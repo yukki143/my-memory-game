@@ -133,9 +133,9 @@ export default function CreateMemorySet() {
     setShowSuccessModal(false);
   };
 
-// 0秒〜900秒（15分）の間に制限する関数
+// 1秒〜900秒（15分）の間に制限する関数
 const clampTime = (totalSeconds: number): number => {
-  return Math.max(0, Math.min(900, totalSeconds));
+  return Math.max(1, Math.min(900, totalSeconds));
 };
 
 // 分・秒の入力変更時の処理
@@ -199,7 +199,7 @@ const handleTimeInput = (
                     onClick={() => { click(); setIsPublic(false)}} 
                     className={`flex-1 py-2 font-bold transition ${!isPublic ? 'bg-[#8d6e63] text-white' : 'text-gray-500'}`}
                   >
-                    🍀 プライベート
+                    🔒 プライベート
                   </button>
                   <button 
                     onClick={() => { click(); setIsPublic(true)}} 
@@ -219,10 +219,10 @@ const handleTimeInput = (
                   <label className="block font-bold text-sm">暗記時間</label>
                   <div className="flex flex-col sm:flex-row items-center gap-4 bg-transparent p-3">
                     <input 
-                      type="range" min="0" max="900" step="1" 
+                      type="range" min="1" max="900" step="1" 
                       className="w-full accent-[#8d6e63] cursor-pointer"
                       value={memorizeTime} 
-                      onChange={e => setMemorizeTime(Number(e.target.value))} 
+                      onChange={e => setMemorizeTime(clampTime(Number(e.target.value)))}
                     />
                     <div className="flex items-center gap-1 shrink-0 font-black text-[#5d4037]">
                       <input 
@@ -248,10 +248,10 @@ const handleTimeInput = (
                   <label className="block font-bold text-sm">回答時間</label>
                   <div className="flex flex-col sm:flex-row items-center gap-4 bg-transparent p-3">
                     <input 
-                      type="range" min="0" max="900" step="1" 
+                      type="range" min="1" max="900" step="1" 
                       className="w-full accent-[#8d6e63] cursor-pointer"
                       value={answerTime} 
-                      onChange={e => setAnswerTime(Number(e.target.value))} 
+                      onChange={e => setAnswerTime(clampTime(Number(e.target.value)))}
                     />
                     <div className="flex items-center gap-1 shrink-0 font-black text-[#5d4037]">
                       <input 
@@ -271,28 +271,6 @@ const handleTimeInput = (
                     </div>
                   </div>
                 </div>
-
-                {/* 暗記時間 */}
-                {/* <div>
-                  <label className="block font-bold mb-1 text-sm">暗記時間 (秒)</label>
-                  <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="900" step="1" 
-                      className="w-full accent-[#8d6e63]"
-                      value={memorizeTime} onChange={e => setMemorizeTime(Number(e.target.value))} />
-                    <span className="font-black text-2xl w-10 text-right">{formatTime(memorizeTime)}</span>
-                  </div>
-                </div> */}
-
-                {/* ★追加: 回答時間 */}
-                {/* <div>
-                  <label className="block font-bold mb-1 text-sm">回答時間 (秒)</label>
-                  <div className="flex items-center gap-2">
-                    <input type="range" min="1" max="900" step="1" 
-                      className="w-full accent-[#8d6e63]"
-                      value={answerTime} onChange={e => setAnswerTime(Number(e.target.value))} />
-                    <span className="font-black text-2xl w-10 text-right">{formatTime(answerTime)}</span>
-                  </div>
-                </div> */}
 
                 {/* 問題数 */}
                 <div>
@@ -341,15 +319,15 @@ const handleTimeInput = (
                 <div className="flex items-center gap-2">
                   <input 
                     type="number" 
-                    min="0"                // UI上の最小値を0に設定
+                    min="1"                // UI上の最小値を1に設定
                     max="5000"             // UI上の最大値を5000に設定
                     className="w-full p-2 border-2 border-[#d7ccc8] rounded-lg font-bold text-center" 
                     value={winScore} 
                     onChange={(e) => {
                       // 入力値を数値に変換
                       const val = Number(e.target.value);
-                      // 0未満は0に、5000超は5000に制限（クランプ処理）
-                      setWinScore(Math.max(0, Math.min(5000, val)));
+                      // 1未満は1に、5000超は5000に制限（クランプ処理）
+                      setWinScore(Math.max(1, Math.min(5000, val)));
                     }} 
                   />
                   <span className="text-xs font-bold shrink-0">{conditionType === 'score' ? '問正解' : '問プレイ'}</span>

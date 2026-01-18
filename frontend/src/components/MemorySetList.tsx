@@ -201,7 +201,7 @@ export default function MemorySetList() {
         {/* 公式テンプレート */}
         <section>
           <h2 className="text-xl font-bold mb-4 px-2 flex items-center gap-2">
-            <span>✨</span> 公式テンプレート
+            <span>⭐</span> 公式テンプレート
           </h2>
           <div className="grid gap-3 opacity-90">
             {filteredOfficialSets.map((set) => (

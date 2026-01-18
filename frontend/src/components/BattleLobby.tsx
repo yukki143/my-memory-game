@@ -63,8 +63,8 @@ export default function BattleLobby() {
   // カテゴリに応じたアイコンを返すヘルパー
   const getCategoryIcon = (category: MemorySetCategory) => {
     switch (category) {
-      case 'private': return '🍀';
-      case 'official': return '✨';
+      case 'private': return '🔒';
+      case 'official': return '⭐';
       case 'public': return '🌐';
       default: return '';
     }
