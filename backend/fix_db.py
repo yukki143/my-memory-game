@@ -2,13 +2,20 @@
 import os
 from dotenv import load_dotenv
 from sqlalchemy import text
-from app.database import engine
+from app.database import engine, Base
+# ここでモデルをインポートすることで、Baseがテーブル構造を把握できるようにします
+# from app.models import User, MemorySet  <-- あなたのモデル定義ファイルをインポートしてください
 
 load_dotenv()
 
 def migrate():
     print(f"Connecting to database to migrate...")
     try:
+        # 【重要】Baseに紐づくすべてのテーブルを新規作成（存在しない場合のみ）
+        # ※ これにより users や memory_sets テーブルが最初に作られます
+        Base.metadata.create_all(bind=engine)
+        print("Base tables created or already exist.")
+        
         with engine.begin() as conn:
             # --- 1. memory_sets テーブルの修正 ---
             print("Checking 'memory_sets' columns...")
