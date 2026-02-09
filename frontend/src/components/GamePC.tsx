@@ -8,7 +8,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 type GamePCProps = {
   onScore?: () => void;
   onWrong?: (problem?: Problem) => void;
-  onTypo?: (expectedChar: string) => void;
+  onTypo?: (expectedChar: string, problem: Problem) => void;
   resetKey: number;
   settings?: GameSettings;
   roomId?: string;
@@ -188,7 +188,7 @@ export default function GamePC({
         if (targetProblem && onTypo) {
             const expectedChar = targetProblem.text[inputVals[index].length];
             if (expectedChar) {
-                onTypo(expectedChar);
+                onTypo(expectedChar, targetProblem);
             } else {
                 // 文字列を超えている場合などは汎用SEのみ
                 playSE('/sounds/se_typo.mp3');

@@ -41,6 +41,23 @@ const MobileScoreBoard = ({ myScore, opponentScore, winningScore, myName, oppone
   </div>
 );
 
+const getCharType = (char: string) => {
+  if (/[a-zA-Z]/.test(char)) return 'roman';
+  if (/[0-9]/.test(char)) return 'digit';
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(char)) return 'hiragana'; 
+  if (/[\u4E00-\u9FFF]/.test(char)) return 'kanji';
+  return 'symbol';
+};
+
+const getBucket = (text: string) => {
+  const len = text.length;
+  if (len <= 2) return '1-2';
+  if (len <= 4) return '3-4';
+  if (len <= 6) return '5-6';
+  if (len <= 10) return '7-10';
+  return '11+';
+};
+
 function BattleMode() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -93,6 +110,37 @@ function BattleMode() {
 
   const [correctOnFirstTry, setCorrectOnFirstTry] = useState(0);
   const [totalRoundsPlayed, setTotalRoundsPlayed] = useState(0);
+
+  const [opponentUserId, setOpponentUserId] = useState<number | null>(null); // 相手のDB上のID
+  const [aggregates, setAggregates] = useState({
+    length_bucket_stats: {} as any,
+    wrong_chars_by_length_bucket: {} as any,
+    char_type_stats: { roman: {total:0, incorrect:0}, digit: {total:0, incorrect:0}, kanji: {total:0, incorrect:0}, hiragana: {total:0, incorrect:0}, symbol: {total:0, incorrect:0} }
+  });
+
+  const updateAggregates = (problem: Problem, isCorrect: boolean, typoChar?: string) => {
+    setAggregates(prev => {
+      const newAgg = { ...prev };
+      const bucket = getBucket(problem.text);
+
+      if (!newAgg.length_bucket_stats[bucket]) newAgg.length_bucket_stats[bucket] = { total: 0, incorrect: 0 };
+      newAgg.length_bucket_stats[bucket].total += 1;
+      if (!isCorrect) newAgg.length_bucket_stats[bucket].incorrect += 1;
+
+      [...problem.text].forEach(char => {
+        const type = getCharType(char);
+        if (newAgg.char_type_stats[type]) newAgg.char_type_stats[type].total += 1;
+      });
+
+      if (typoChar) {
+        const type = getCharType(typoChar);
+        if (newAgg.char_type_stats[type]) newAgg.char_type_stats[type].incorrect += 1;
+        if (!newAgg.wrong_chars_by_length_bucket[bucket]) newAgg.wrong_chars_by_length_bucket[bucket] = {};
+        newAgg.wrong_chars_by_length_bucket[bucket][typoChar] = (newAgg.wrong_chars_by_length_bucket[bucket][typoChar] || 0) + 1;
+      }
+      return newAgg;
+    });
+  };
 
   const socketRef = useRef<WebSocket | null>(null);
   const roundNumberRef = useRef(0); 
@@ -288,12 +336,39 @@ function BattleMode() {
     }
   }, [myScore, opponentScore, roundNumber, gameStatus, CONDITION_TYPE, WINNING_SCORE]);
 
-  const finishGame = (isWin: boolean) => {
+  const finishGame = async (isWin: boolean) => { // ★async に変更
     if (gameStatus === 'finished') return;
     setGameStatus('finished');
-    setClearTime((Date.now() - startTime) / 1000);
+    const finalTime = (Date.now() - startTime) / 1000;
+    setClearTime(finalTime);
+    
     if (isWin) { playSE('/sounds/se_win.mp3'); setWinStreak(prev => prev + 1); } 
     else { playSE('/sounds/se_lose.mp3'); setWinStreak(0); }
+
+    // ★統計送信ロジックの追加
+    const result = myScore > opponentScore ? "win" : myScore < opponentScore ? "lose" : "draw";
+    const attempted = myScore + missedProblems.length;
+    const accuracy = attempted === 0 ? 0 : (myScore / attempted) * 100;
+
+    try {
+      await authFetch("/api/stats/session", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "battle",
+          set_id: String(memorySetId || "default"),
+          accuracy: accuracy,
+          total_questions: roundNumber,
+          result: result,
+          score_for: myScore,
+          score_against: opponentScore,
+          opponent_user_id: opponentUserId, 
+          room_id: roomId,
+          aggregates
+        })
+      });
+    } catch (e) {
+      console.error("Battle stats post failed", e);
+    }
   };
 
   const prepareNextGame = () => {
@@ -315,21 +390,29 @@ function BattleMode() {
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     setTotalRoundsPlayed(prev => prev + 1);
     setCorrectOnFirstTry(prev => prev + 1);
-    if (problem) recordStat(problem.text, true);
+    if (problem) {
+      recordStat(problem.text, true);
+      updateAggregates(problem, true);
+    }
     wsSend(`SCORE_UP:round${roundNumber}`); 
   };
 
   const sendMiss = (problem?: Problem) => {
     if (gameStatus !== 'playing' || iMissed || roundResult === 'correct' || roundWinnerId) return;
     setTotalRoundsPlayed(prev => prev + 1);
-    if (problem) { setMissedProblems(prev => [...prev, problem]); recordStat(problem.text, false); }
+    if (problem) { 
+      setMissedProblems(prev => [...prev, problem]); 
+      recordStat(problem.text, false);
+      updateAggregates(problem, false, problem.text[0]);
+    }
     wsSend(`MISS:round${roundNumber}`);
   };
 
-  const handleTypo = (expectedChar: string) => {
+  const handleTypo = (expectedChar: string, problem: Problem) => {
       if (gameStatus === 'playing') {
           playSE('/sounds/se_typo.mp3');
           setMyTypoCount(prev => prev + 1);
+          updateAggregates(problem, false, expectedChar);
           setMissedKeyStats(prev => {
               const char = expectedChar.toUpperCase();
               return { ...prev, [char]: (prev[char] || 0) + 1 };

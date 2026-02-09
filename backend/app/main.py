@@ -147,35 +147,35 @@ def _compute_set_summaries(sessions: List[models.PlaySession]) -> List[schemas.S
         by_set.setdefault(s.set_id, []).append(s)
 
     out: List[schemas.StatsSetSummary] = []
-    for set_id, ss in by_set.items():
-        acc = [float(x.accuracy) for x in ss if x.accuracy is not None]
-        time_vals = [float(x.time) for x in ss if x.time is not None]
-        spd = [float(x.avg_speed) for x in ss if x.avg_speed is not None]
+    for sid, ss in by_set.items():
+        # 数値抽出
+        accs = [float(x.accuracy or 0.0) for x in ss]
+        times = [float(x.time or 0.0) for x in ss if x.time is not None]
+        speeds = [float(x.avg_speed or 0.0) for x in ss if x.avg_speed is not None]
+        
+        # バトル用集計
+        wins = len([x for x in ss if x.result == "win"])
+        score_diffs = [(int(x.score_for or 0) - int(x.score_against or 0)) for x in ss if x.score_for is not None]
 
-        acc_best, acc_avg, acc_med, acc_std = _compute_summary(acc, best="max")
-        time_best, time_avg, time_med, time_std = _compute_summary(time_vals, best="min")
-        spd_best, spd_avg, spd_med, spd_std = _compute_summary(spd, best="min")
-
-        out.append(
-            schemas.StatsSetSummary(
-                set_id=set_id,
-                sessions=len(ss),
-                accuracy_best=acc_best,
-                accuracy_avg=acc_avg,
-                accuracy_median=acc_med,
-                accuracy_std=acc_std,
-                time_best=time_best,
-                time_avg=time_avg,
-                time_median=time_med,
-                time_std=time_std,
-                avg_speed_best=spd_best,
-                avg_speed_avg=spd_avg,
-                avg_speed_median=spd_med,
-                avg_speed_std=spd_std,
-            )
+        summary = schemas.StatsSetSummary(
+            set_id=sid,
+            play_count=len(ss),
+            best_accuracy=max(accs) if accs else None,
+            avg_accuracy=(sum(accs) / len(accs)) if accs else None,
+            median_accuracy=statistics.median(accs) if accs else None,
+            stdev_accuracy=statistics.pstdev(accs) if len(accs) >= 2 else 0.0,
+            best_time=min(times) if times else None,
+            avg_time=(sum(times) / len(times)) if times else None,
+            median_time=statistics.median(times) if times else None,
+            avg_speed=(sum(speeds) / len(speeds)) if speeds else None,
+            # バトル指標
+            win_count=wins,
+            win_rate=(wins / len(ss) * 100.0) if len(ss) > 0 else 0.0,
+            avg_score_diff=(sum(score_diffs) / len(score_diffs)) if score_diffs else 0.0
         )
+        out.append(summary)
 
-    out.sort(key=lambda x: x.sessions, reverse=True)
+    out.sort(key=lambda x: x.play_count, reverse=True)
     return out
 
 def _compute_required_attempts_90(sessions: List[models.PlaySession]) -> tuple[Optional[float], List[schemas.RequiredAttemptsItem]]:
@@ -548,47 +548,6 @@ def _query_sessions_for_stats(
     return q.order_by(models.PlaySession.created_at.asc()).all()
 
 
-def _compute_set_summaries(sessions: List[models.PlaySession]) -> List[schemas.StatsSetSummary]:
-    by_set: Dict[str, List[models.PlaySession]] = {}
-    for s in sessions:
-        by_set.setdefault(s.set_id, []).append(s)
-
-    out: List[schemas.StatsSetSummary] = []
-    for sid, ss in by_set.items():
-        accs = [float(x.accuracy or 0.0) for x in ss]
-        times = [float(x.time or 0.0) for x in ss if x.time is not None]
-        speeds = [float(x.avg_speed or 0.0) for x in ss if x.avg_speed is not None]
-
-        best_accuracy = max(accs) if accs else None
-        avg_accuracy = (sum(accs) / len(accs)) if accs else None
-        median_accuracy = statistics.median(accs) if accs else None
-        stdev_accuracy = statistics.pstdev(accs) if len(accs) >= 2 else None
-
-        best_time = min(times) if times else None
-        avg_time = (sum(times) / len(times)) if times else None
-        median_time = statistics.median(times) if times else None
-
-        avg_speed = (sum(speeds) / len(speeds)) if speeds else None
-
-        out.append(
-            schemas.StatsSetSummary(
-                set_id=sid,
-                play_count=len(ss),
-                best_accuracy=best_accuracy,
-                avg_accuracy=avg_accuracy,
-                median_accuracy=median_accuracy,
-                stdev_accuracy=stdev_accuracy,
-                best_time=best_time,
-                avg_time=avg_time,
-                median_time=median_time,
-                avg_speed=avg_speed,
-            )
-        )
-
-    out.sort(key=lambda x: (-x.play_count, x.set_id))
-    return out
-
-
 def _compute_required_attempts_90(sessions: List[models.PlaySession]) -> tuple[Optional[float], List[schemas.RequiredAttemptsItem]]:
     by_set: Dict[str, List[models.PlaySession]] = {}
     for s in sessions:
@@ -742,6 +701,7 @@ def post_stats_session(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    # attempt_index の算出（ユーザーID + モード + セットID ごとの連番）
     max_attempt = (
         db.query(func.max(models.PlaySession.attempt_index))
         .filter(
@@ -754,6 +714,7 @@ def post_stats_session(
     )
     attempt_index = int(max_attempt) + 1
 
+    # セッション情報の作成
     session = models.PlaySession(
         user_id=current_user.id,
         mode=payload.mode,
@@ -803,23 +764,28 @@ def post_stats_session(
 
 
 # --- SOLO ---
+
+# --- 取得API: ソロを例に記述（バトル等も内部で _query_sessions_for_stats を呼ぶ点は共通） ---
 @app.get("/api/stats/solo", response_model=schemas.StatsResponse)
-def get_stats_solo(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_stats_solo(period: str = "30", set_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
     return _stats_response_from_sessions(sessions)
 
+# 文字数棒グラフ用（バケット別ミス率）
 @app.get("/api/stats/solo/length", response_model=schemas.LengthStatsResponse)
-def get_stats_solo_length(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_stats_solo_length(period: str = "30", set_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
     return _length_stats_from_sessions(sessions)
 
+# 棒クリック用: ミス文字一覧 TOP N
 @app.get("/api/stats/solo/wrong_chars", response_model=schemas.WrongCharsResponse)
-def get_stats_solo_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = None, top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_stats_solo_wrong_chars(bucket: str, period: str = "30", set_id: Optional[str] = "all", top_n: int = 20, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
     return _wrong_chars_from_sessions(sessions, bucket=bucket, top_n=top_n)
 
+# 五角形用: レーダーチャート
 @app.get("/api/stats/solo/radar", response_model=schemas.RadarResponse)
-def get_stats_solo_radar(period: str = "30", set_id: Optional[str] = None, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+def get_stats_solo_radar(period: str = "30", set_id: Optional[str] = "all", db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     sessions = _query_sessions_for_stats(db, current_user.id, ["solo"], period, set_id=set_id)
     return _radar_from_sessions(sessions)
 

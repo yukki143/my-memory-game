@@ -10,6 +10,23 @@ import { useBgm } from '../context/BgmContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
+const getCharType = (char: string) => {
+  if (/[a-zA-Z]/.test(char)) return 'roman';
+  if (/[0-9]/.test(char)) return 'digit';
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(char)) return 'hiragana'; 
+  if (/[\u4E00-\u9FFF]/.test(char)) return 'kanji';
+  return 'symbol';
+};
+
+const getBucket = (text: string) => {
+  const len = text.length;
+  if (len <= 2) return '1-2';
+  if (len <= 4) return '3-4';
+  if (len <= 6) return '5-6';
+  if (len <= 10) return '7-10';
+  return '11+';
+};
+
 type RankEntry = {
   name: string;
   time: number;
@@ -54,6 +71,48 @@ function SoloMode({ onBack }: { onBack: () => void }) {
 
   const MEMORIZE_TIME_SEC = settings.memorizeTime ?? 3;
   const POST_ANSWER_DELAY = 0.5; // この秒数だけ〇✕が表示されます
+
+  const [aggregates, setAggregates] = useState({
+    length_bucket_stats: {} as any,
+    wrong_chars_by_length_bucket: {} as any,
+    char_type_stats: { 
+      roman: {total:0, incorrect:0}, 
+      digit: {total:0, incorrect:0}, 
+      kanji: {total:0, incorrect:0}, 
+      hiragana: {total:0, incorrect:0}, 
+      symbol: {total:0, incorrect:0} 
+    }
+  });
+
+  const updateAggregates = (problem: Problem, isCorrect: boolean, typoChar?: string) => {
+    setAggregates(prev => {
+      const newAgg = { ...prev };
+      const bucket = getBucket(problem.text);
+
+      // 1. 文字数バケット更新
+      if (!newAgg.length_bucket_stats[bucket]) newAgg.length_bucket_stats[bucket] = { total: 0, incorrect: 0 };
+      newAgg.length_bucket_stats[bucket].total += 1;
+      if (!isCorrect) newAgg.length_bucket_stats[bucket].incorrect += 1;
+
+      // 2. 文字種別更新 (正解テキストの全文字を total に加算)
+      [...problem.text].forEach(char => {
+        const type = getCharType(char);
+        if (newAgg.char_type_stats[type]) newAgg.char_type_stats[type].total += 1;
+      });
+
+      // 3. ミス文字の記録
+      if (typoChar) {
+        const type = getCharType(typoChar);
+        if (newAgg.char_type_stats[type]) newAgg.char_type_stats[type].incorrect += 1;
+        
+        if (!newAgg.wrong_chars_by_length_bucket[bucket]) newAgg.wrong_chars_by_length_bucket[bucket] = {};
+        const bucketWrong = { ...newAgg.wrong_chars_by_length_bucket[bucket] };
+        bucketWrong[typoChar] = (bucketWrong[typoChar] || 0) + 1;
+        newAgg.wrong_chars_by_length_bucket[bucket] = bucketWrong;
+      }
+      return newAgg;
+    });
+  };
 
   // ★ 追加: Soloのゲーム状態に応じてBGMシーン/停止を更新
   useEffect(() => {
@@ -182,7 +241,10 @@ function SoloMode({ onBack }: { onBack: () => void }) {
     // ★ 〇を表示
     setRoundResult('correct');
 
-    if (problem) recordStat(problem.text, true);
+    if (problem) {
+      recordStat(problem.text, true);
+      updateAggregates(problem, true);
+    }
 
     setTimeout(() => {
       if (gameState !== 'playing') return;
@@ -206,6 +268,7 @@ function SoloMode({ onBack }: { onBack: () => void }) {
     setRoundResult('wrong');
 
     recordStat(problem.text, false);
+    updateAggregates(problem, false, problem.text[0]);
 
     setTimeout(() => {
       if (gameState !== 'playing') return;
@@ -228,11 +291,33 @@ function SoloMode({ onBack }: { onBack: () => void }) {
       });
   };
 
-  const finishGame = () => {
+  // --- async を追加して関数を書き換え ---
+  const finishGame = async () => {
     playSE('/sounds/se_win.mp3');
-    setFullClearTime((Date.now() - startTime) / 1000);
+    const finalTime = (Date.now() - startTime) / 1000;
+    setFullClearTime(finalTime);
     setGameState('finished');
     setRoundResult(null);
+
+    // ★追加: 最終統計の計算と送信
+    const { accuracy, avgSpeed } = calculatePureStats();
+    
+    try {
+      await authFetch("/api/stats/session", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "solo",
+          set_id: CURRENT_SET_ID,
+          time: finalTime,
+          accuracy: accuracy,
+          avg_speed: avgSpeed,
+          total_questions: totalAttempted + 1, // 現在の1問分を足す
+          aggregates
+        })
+      });
+    } catch (e) {
+      console.error("Stats session post failed", e);
+    }
   };
 
   const fetchRanking = async () => {

@@ -80,7 +80,8 @@ def migrate():
                 );
             """))
 
-            # 検索・集計に必須のインデックス
+            # 統計検索を高速化するためのインデックス
+            print("Creating indexes for stats performance...")
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_play_sessions_user_id ON play_sessions (user_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_play_sessions_mode ON play_sessions (mode);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_play_sessions_set_id ON play_sessions (set_id);"))

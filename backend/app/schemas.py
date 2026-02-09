@@ -118,6 +118,7 @@ class StatsSetSummary(BaseModel):
     set_id: str
     play_count: int
 
+    # 基本指標
     best_accuracy: Optional[float] = None
     avg_accuracy: Optional[float] = None
     median_accuracy: Optional[float] = None
@@ -128,6 +129,13 @@ class StatsSetSummary(BaseModel):
     median_time: Optional[float] = None
 
     avg_speed: Optional[float] = None
+
+    # バトル用追加指標
+    win_count: int = 0
+    win_rate: float = 0.0          # 勝率 (%)
+    avg_score_diff: float = 0.0    # 平均スコア差 (自分 - 相手)
+    class Config:
+        from_attributes = True
 
 class RequiredAttemptsItem(BaseModel):
     set_id: str
