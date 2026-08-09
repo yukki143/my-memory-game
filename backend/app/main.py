@@ -106,6 +106,9 @@ def seed_official_sets():
 # --- FastAPIアプリ定義 ---
 app = FastAPI()
 
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok"}
 
 @app.on_event("startup")
 async def startup_event():
